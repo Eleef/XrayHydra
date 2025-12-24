@@ -12,6 +12,8 @@ class App {
         this.selectedNodeIds = new Set();
         this.proxies = [];
         this.xrayStatus = 'stopped';
+        this.healthStates = {};  // {port: healthState}
+        this.healthConfig = null;
 
         // DOM Elements
         this.elements = {
@@ -46,6 +48,9 @@ class App {
 
         // Auto-refresh status every 5 seconds
         setInterval(() => this.updateSystemStatus(), 5000);
+
+        // Auto-refresh health status every 10 seconds
+        setInterval(() => this.refreshHealthStatus(), 10000);
     }
 
     /**
@@ -70,6 +75,13 @@ class App {
         this.elements.btnTestAll.addEventListener('click', () => this.testAllProxies());
         this.elements.btnClearProxies.addEventListener('click', () => this.clearAllProxies());
         this.elements.proxiesContainer.addEventListener('click', (e) => this.handleProxyClick(e));
+        this.elements.proxiesContainer.addEventListener('contextmenu', (e) => {
+            const item = e.target.closest('.proxy-item');
+            if (item) {
+                const port = parseInt(item.dataset.port);
+                this.showProxyContextMenu(e, port);
+            }
+        });
 
         // Modal
         this.elements.btnConfirmAdd.addEventListener('click', () => this.confirmAddSubscription());
@@ -101,6 +113,9 @@ class App {
 
             // Update system status
             await this.updateSystemStatus();
+
+            // Load health status
+            await this.refreshHealthStatus();
         } catch (error) {
             console.error('Failed to load initial data:', error);
             Components.showToast('加载数据失败', 'error');
@@ -708,6 +723,195 @@ class App {
         } finally {
             this.elements.btnToggleXray.disabled = false;
         }
+    }
+
+    // ==================== Health Monitoring ====================
+
+    /**
+     * Refresh health status for all proxies
+     */
+    async refreshHealthStatus() {
+        if (this.proxies.length === 0) return;
+
+        try {
+            const data = await api.getHealthStatus();
+
+            // Build health states map
+            this.healthStates = {};
+            (data.states || []).forEach(state => {
+                this.healthStates[state.proxy_port] = state;
+            });
+
+            // Update proxy display
+            this.updateProxyHealthDisplay();
+        } catch (error) {
+            console.error('Failed to refresh health status:', error);
+        }
+    }
+
+    /**
+     * Get health state for a specific port
+     */
+    getHealthForPort(port) {
+        return this.healthStates[port] || { status: 'healthy', failure_count: 0 };
+    }
+
+    /**
+     * Update proxy items with health status
+     */
+    updateProxyHealthDisplay() {
+        document.querySelectorAll('.proxy-item').forEach(item => {
+            const port = parseInt(item.dataset.port);
+            const health = this.getHealthForPort(port);
+
+            // Update or create health indicator
+            let indicator = item.querySelector('.health-indicator');
+            if (!indicator) {
+                indicator = document.createElement('span');
+                indicator.className = 'health-indicator';
+                const portEl = item.querySelector('.proxy-port');
+                if (portEl) {
+                    portEl.insertAdjacentElement('afterend', indicator);
+                }
+            }
+
+            indicator.className = `health-indicator ${health.status}`;
+            indicator.title = this.getHealthTooltip(health);
+        });
+    }
+
+    /**
+     * Get tooltip text for health indicator
+     */
+    getHealthTooltip(health) {
+        const statusTexts = {
+            healthy: '健康',
+            degraded: '降级',
+            disabled: '禁用'
+        };
+
+        let tooltip = statusTexts[health.status] || health.status;
+
+        if (health.status === 'disabled' && health.penalty_remaining_seconds) {
+            tooltip += ` (剩余 ${this.formatPenaltyTime(health.penalty_remaining_seconds)})`;
+        }
+
+        if (health.last_latency_ms) {
+            tooltip += ` | 延迟: ${health.last_latency_ms}ms`;
+        }
+
+        return tooltip;
+    }
+
+    /**
+     * Format penalty time remaining
+     */
+    formatPenaltyTime(seconds) {
+        if (seconds < 60) {
+            return `${seconds}秒`;
+        } else if (seconds < 3600) {
+            return `${Math.ceil(seconds / 60)}分钟`;
+        } else {
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.ceil((seconds % 3600) / 60);
+            return `${hours}小时${mins}分钟`;
+        }
+    }
+
+    /**
+     * Reset health state for a proxy
+     */
+    async resetProxyHealth(port) {
+        try {
+            await api.resetProxyHealth(port);
+            await this.refreshHealthStatus();
+            Components.showToast(`端口 ${port} 健康状态已重置`, 'success');
+        } catch (error) {
+            Components.showToast(`重置失败: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * Show context menu for proxy
+     */
+    showProxyContextMenu(e, port) {
+        e.preventDefault();
+
+        // Remove existing context menu
+        const existing = document.querySelector('.context-menu');
+        if (existing) existing.remove();
+
+        const health = this.getHealthForPort(port);
+
+        const menu = document.createElement('div');
+        menu.className = 'context-menu active';
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+
+        menu.innerHTML = `
+            <div class="context-menu-item" data-action="copy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                复制地址
+            </div>
+            <div class="context-menu-item" data-action="test">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                测试连通性
+            </div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" data-action="reset-health">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                    <path d="M21 3v5h-5"></path>
+                    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                    <path d="M8 16H3v5"></path>
+                </svg>
+                重置健康状态
+            </div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item danger" data-action="remove">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                移除代理
+            </div>
+        `;
+
+        document.body.appendChild(menu);
+
+        // Handle menu item clicks
+        menu.addEventListener('click', async (e) => {
+            const item = e.target.closest('.context-menu-item');
+            if (!item) return;
+
+            const action = item.dataset.action;
+            menu.remove();
+
+            if (action === 'copy') {
+                await this.copyProxyAddress(port);
+            } else if (action === 'test') {
+                await this.testSingleProxy(port);
+            } else if (action === 'reset-health') {
+                await this.resetProxyHealth(port);
+            } else if (action === 'remove') {
+                await this.removeProxy(port);
+            }
+        });
+
+        // Close menu on click outside
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeMenu), 0);
     }
 }
 

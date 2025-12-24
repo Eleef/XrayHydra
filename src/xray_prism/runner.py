@@ -197,6 +197,31 @@ class XrayRunner:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
     
+    def _cleanup_orphan_processes(self) -> None:
+        """清理可能存在的僵尸 Xray 进程"""
+        try:
+            if platform.system().lower() == "windows":
+                # Windows: 使用 taskkill 杀掉所有 xray.exe 进程
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "xray.exe"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5
+                )
+                logger.debug("已清理遗留的 xray.exe 进程")
+            else:
+                # Linux/macOS: 使用 pkill
+                subprocess.run(
+                    ["pkill", "-9", "xray"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5
+                )
+                logger.debug("已清理遗留的 xray 进程")
+        except Exception as e:
+            # 如果清理失败也继续执行（可能没有遗留进程）
+            logger.debug(f"清理遗留进程时出错（可忽略）: {e}")
+    
     def start(self, config_path: str) -> subprocess.Popen:
         """
         启动 Xray 进程
@@ -210,6 +235,9 @@ class XrayRunner:
         if self._process and self._process.poll() is None:
             logger.warning("Xray 已在运行，先停止现有进程")
             self.stop()
+        
+        # 清理可能存在的僵尸进程（防止服务重启后的遗留进程）
+        self._cleanup_orphan_processes()
         
         xray = self.xray_path
         config = Path(config_path).absolute()

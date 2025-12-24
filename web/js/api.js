@@ -209,7 +209,98 @@ class ApiClient {
             method: 'POST',
         });
     }
+
+    // ==================== Health Monitoring ====================
+
+    /**
+     * Get health status for all proxies
+     * @returns {Promise<{states: Array, total: number, healthy_count: number, degraded_count: number, disabled_count: number}>}
+     */
+    async getHealthStatus() {
+        return this.request('/health/status');
+    }
+
+    /**
+     * Get health status for a specific proxy
+     * @param {number} port - Port number
+     * @returns {Promise<object>}
+     */
+    async getProxyHealthStatus(port) {
+        return this.request(`/health/status/${port}`);
+    }
+
+    /**
+     * Get health monitoring configuration
+     * @returns {Promise<object>}
+     */
+    async getHealthConfig() {
+        return this.request('/health/config');
+    }
+
+    /**
+     * Update health monitoring configuration
+     * @param {object} config - Configuration updates
+     * @returns {Promise<object>}
+     */
+    async updateHealthConfig(config) {
+        return this.request('/health/config', {
+            method: 'PUT',
+            body: JSON.stringify(config),
+        });
+    }
+
+    /**
+     * Reset health state for a specific proxy
+     * @param {number} port - Port number
+     * @returns {Promise<object>}
+     */
+    async resetProxyHealth(port) {
+        return this.request(`/health/reset/${port}`, {
+            method: 'POST',
+        });
+    }
+
+    /**
+     * Reset health states for all proxies
+     * @returns {Promise<object>}
+     */
+    async resetAllHealth() {
+        return this.request('/health/reset-all', {
+            method: 'POST',
+        });
+    }
+
+    /**
+     * Manually run a health check
+     * @returns {Promise<object>}
+     */
+    async runHealthCheck() {
+        return this.request('/health/check', {
+            method: 'POST',
+        });
+    }
+
+    /**
+     * Start background health monitoring
+     * @returns {Promise<object>}
+     */
+    async startHealthMonitoring() {
+        return this.request('/health/monitoring/start', {
+            method: 'POST',
+        });
+    }
+
+    /**
+     * Stop background health monitoring
+     * @returns {Promise<object>}
+     */
+    async stopHealthMonitoring() {
+        return this.request('/health/monitoring/stop', {
+            method: 'POST',
+        });
+    }
 }
 
 // Export singleton instance
 const api = new ApiClient();
+

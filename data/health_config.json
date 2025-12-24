@@ -1,0 +1,30 @@
+{
+    "enabled": true,
+    "check_interval_seconds": 60,
+    "test_target": "http://www.baidu.com",
+    "test_timeout_seconds": 5,
+    "max_workers": 20,
+    "test_targets_presets": [
+        {
+            "name": "百度 (国内)",
+            "url": "http://www.baidu.com"
+        },
+        {
+            "name": "淘宝 (国内)",
+            "url": "http://www.taobao.com"
+        },
+        {
+            "name": "Google (国外)",
+            "url": "http://www.google.com"
+        },
+        {
+            "name": "Cloudflare (国外)",
+            "url": "http://1.1.1.1"
+        }
+    ],
+    "penalty_levels_minutes": [
+        5,
+        30,
+        150
+    ]
+}

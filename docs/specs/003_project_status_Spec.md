@@ -1,13 +1,16 @@
 # Xray-Prism 项目状态文档
 
-> 最后更新：2025-12-24
-> 版本：v0.2.0 (Web 前端完成)
+> 最后更新：2025-12-25  
+> 版本：v0.4.0 (健康监测 + 简约UI)
 
 ## 1. 项目概述
 
 **Xray-Prism** 是一个 Python 自动化工具，将 VPN 订阅中的每个节点映射为本地独立端口，实现并发使用不同 IP 出口。
 
-**v0.2.0 新增**: Web 管理界面，支持通过浏览器管理订阅、节点和代理。
+**最新版本特性**:
+- **v0.4.0**: 全新简约明亮主题，三栏并排布局，紧凑设计
+- **v0.3.0**: 实时健康监测系统，递进式罚时机制，自动剔除不健康节点
+- **v0.2.0**: Web 管理界面，支持通过浏览器管理订阅、节点和代理
 
 ### 核心功能
 - 从 URL 或本地文件获取订阅内容
@@ -15,6 +18,8 @@
 - 支持 VMess / VLess / Shadowsocks / Trojan 协议
 - 生成 Xray-core 配置（每节点一端口，路由 1:1 硬绑定）
 - 自动下载和管理 Xray 内核
+- 🏥 **实时健康监测**：自动检测代理连通性，递进式罚时
+- 🌟 **简约Web界面**：三栏并排布局，明亮主题
 - 并发测试所有代理端口的连通性
 - 输出代理列表文件
 
@@ -24,28 +29,57 @@
 
 ```
 d:\project\XrayHydra\
-├── main.py                    # 主程序入口 (CLI)
+├── server.py                  # Web 服务器入口
+├── main.py                    # CLI 主程序入口
 ├── config.json                # 生成的 Xray 配置
 ├── proxies.txt                # 生成的代理列表
-├── subscription_sample.txt    # 订阅样本（调试用）
 ├── requirements.txt           # Python 依赖
 ├── README.md                  # 使用说明
 ├── CHANGELOG.md               # 变更日志
 ├── bin/                       # 自动下载的 Xray 内核
 │   └── xray.exe
+├── data/                      # 数据存储目录
+│   ├── subscriptions.json     # 订阅信息
+│   ├── active_proxies.json    # 活跃代理列表
+│   ├── health_config.json     # 健康监测配置
+│   └── health_state.json      # 健康状态数据
 ├── docs/
-│   ├── PROJECT_STATUS.md      # 本文档
 │   └── specs/                 # 模块规格文档
 │       ├── 001_models_Spec.md
-│       └── 002_fetcher_Spec.md
+│       ├── 002_fetcher_Spec.md
+│       ├── 003_project_status_Spec.md
+│       └── 005_health_monitoring_implementation.md
 ├── src/xray_prism/            # 核心模块
 │   ├── __init__.py
-│   ├── models.py              # 数据模型层
+│   ├── models.py              # 数据模型层（含健康状态模型）
 │   ├── fetcher.py             # 网络获取层
 │   ├── parser.py              # 协议解析层
 │   ├── generator.py           # 配置生成层
-│   ├── runner.py              # 进程管理层
-│   └── tester.py              # 连通性测试层
+│   ├── runner.py              # 进程管理层（含僵尸进程清理）
+│   ├── tester.py              # 连通性测试层
+│   └── health_monitor.py      # 健康监测引擎 (v0.3.0)
+├── api/                       # FastAPI 后端
+│   ├── main.py                # FastAPI 应用入口
+│   ├── routes/                # API 路由
+│   │   ├── subscriptions.py   # 订阅管理
+│   │   ├── nodes.py           # 节点管理
+│   │   ├── proxies.py         # 代理管理
+│   │   ├── system.py          # 系统控制
+│   │   └── health.py          # 健康监测 (v0.3.0)
+│   ├── schemas/               # Pydantic 模型
+│   │   └── models.py          # API 数据模型
+│   └── services/              # 业务逻辑层
+│       ├── subscription_service.py
+│       ├── proxy_service.py
+│       └── health_service.py  # 健康服务 (v0.3.0)
+├── web/                       # Web 前端
+│   ├── index.html             # 主页面（三栏布局）
+│   ├── css/
+│   │   └── style.css          # 简约明亮主题 (v0.4.0)
+│   └── js/
+│       ├── api.js             # API 客户端
+│       ├── components.js      # UI 组件
+│       └── app.js             # 应用逻辑（含健康监测）
 └── tests/                     # 单元测试
     ├── __init__.py
     ├── test_models.py
@@ -69,6 +103,8 @@ d:\project\XrayHydra\
 | `ProxyNode` | 统一代理节点模型，包含所有协议的字段 |
 | `TestResult` | 测试结果模型 |
 | `PortMapping` | 端口映射记录（本地端口 ↔ 节点） |
+| `HealthStatus` | 健康状态枚举：HEALTHY, DEGRADED, DISABLED (v0.3.0) |
+| `ProxyHealthState` | 代理健康状态数据类（包含罚时、失败次数等） (v0.3.0) |
 
 **关键字段** (`ProxyNode`):
 ```python
@@ -209,7 +245,39 @@ allow_insecure: bool    # 跳过证书验证
 
 ---
 
-### 3.7 main.py - 主程序入口
+### 3.7 health_monitor.py - 健康监测引擎 (v0.3.0)
+
+**文件路径**: `src/xray_prism/health_monitor.py`
+
+**类**: `HealthMonitor`
+
+| 方法 | 描述 |
+|:---|:---|
+| `run_health_check()` | 执行一轮完整健康检查 |
+| `probe_proxy(port)` | 探测单个代理连通性 |
+| `check_network_connectivity()` | 检查本机网络状态 |
+| `handle_probe_success(port)` | 处理成功探测（重置罚时） |
+| `handle_probe_failure(port)` | 处理失败探测（递增罚时） |
+| `get_healthy_ports()` | 获取所有健康代理端口 |
+| `reset_state(port)` | 重置代理健康状态 |
+
+**核心特性**:
+- 🔄 **递进式罚时**: 5分钟 → 30分钟 → 150分钟
+- 🌐 **网络容错**: 检测本机网络，避免误判
+- 📊 **状态追踪**: 实时记录失败次数、罚时等
+- 💾 **持久化**: 健康状态保存到 JSON 文件
+
+**默认配置**:
+```python
+check_interval_seconds = 60      # 检测间隔
+test_target = "http://www.baidu.com"  # 测试目标
+test_timeout_seconds = 5         # 超时时间
+penalty_levels_minutes = [5, 30, 150]  # 罚时等级
+```
+
+---
+
+### 3.8 main.py - 主程序入口
 
 **命令行参数**:
 

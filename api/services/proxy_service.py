@@ -20,6 +20,11 @@ from src.xray_prism.tester import ProxyTester
 
 from api.services.subscription_service import get_subscription_service
 
+# Import health service (delayed to avoid circular import)
+def get_health_service():
+    from api.services.health_service import get_health_service as _get_health
+    return _get_health()
+
 
 class ProxyService:
     """Service for managing active proxies and Xray process."""
@@ -249,6 +254,19 @@ class ProxyService:
         try:
             self._runner.start(config_path)
             self._start_time = time.time()
+            
+            # Start health monitoring
+            try:
+                health_service = get_health_service()
+                active_ports = [p["port"] for p in self._data.get("proxies", [])]
+                health_service.sync_with_proxies(active_ports)
+                health_service.start_monitoring(
+                    lambda: [p["port"] for p in self.get_all_proxies()]
+                )
+            except Exception as e:
+                # Log but don't fail if health monitoring fails
+                print(f"Warning: Failed to start health monitoring: {e}")
+            
             return {"success": True, "message": "Xray started successfully", "status": "running"}
         except Exception as e:
             return {"success": False, "message": f"Failed to start Xray: {e}", "status": "error"}
@@ -261,6 +279,14 @@ class ProxyService:
         try:
             self._runner.stop()
             self._start_time = None
+            
+            # Stop health monitoring
+            try:
+                health_service = get_health_service()
+                health_service.stop_monitoring()
+            except Exception as e:
+                print(f"Warning: Failed to stop health monitoring: {e}")
+            
             return {"success": True, "message": "Xray stopped successfully", "status": "stopped"}
         except Exception as e:
             return {"success": False, "message": f"Failed to stop Xray: {e}", "status": "error"}

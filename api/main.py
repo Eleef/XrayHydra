@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from api.routes import subscriptions, proxies, system, nodes
+from api.routes import subscriptions, proxies, system, nodes, health
 
 # Create FastAPI app
 app = FastAPI(
@@ -39,6 +39,7 @@ app.include_router(subscriptions.router)
 app.include_router(nodes.router)
 app.include_router(proxies.router)
 app.include_router(system.router)
+app.include_router(health.router)
 
 
 # Static files for web frontend

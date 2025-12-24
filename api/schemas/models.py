@@ -152,3 +152,58 @@ class SuccessResponse(BaseModel):
     """Standard success response."""
     success: bool = True
     message: str
+
+
+# ==================== Health Monitoring Schemas ====================
+
+class HealthStatusEnum(str, Enum):
+    """Health status for a proxy."""
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    DISABLED = "disabled"
+
+
+class TestTargetPreset(BaseModel):
+    """Preset test target."""
+    name: str
+    url: str
+
+
+class ProxyHealthResponse(BaseModel):
+    """Response model for proxy health state."""
+    proxy_port: int
+    status: HealthStatusEnum
+    failure_count: int = 0
+    penalty_level: int = 0
+    penalty_remaining_seconds: Optional[int] = None
+    last_check: Optional[datetime] = None
+    last_success: Optional[datetime] = None
+    last_latency_ms: Optional[float] = None
+
+
+class HealthStatusListResponse(BaseModel):
+    """Response model for list of health states."""
+    states: List[ProxyHealthResponse]
+    total: int
+    healthy_count: int
+    degraded_count: int
+    disabled_count: int
+
+
+class HealthConfigResponse(BaseModel):
+    """Response model for health monitoring config."""
+    enabled: bool
+    check_interval_seconds: int
+    test_target: str
+    test_timeout_seconds: int
+    test_targets_presets: List[TestTargetPreset]
+    penalty_levels_minutes: List[int]
+    is_monitoring: bool
+
+
+class HealthConfigUpdate(BaseModel):
+    """Request model for updating health config."""
+    enabled: Optional[bool] = None
+    check_interval_seconds: Optional[int] = Field(None, ge=10, le=3600)
+    test_target: Optional[str] = None
+    test_timeout_seconds: Optional[int] = Field(None, ge=1, le=30)

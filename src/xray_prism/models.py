@@ -6,6 +6,7 @@ Xray-Prism 数据模型层
 """
 
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict, Any
 
@@ -151,3 +152,70 @@ class PortMapping:
         """自动生成 inbound/outbound tag"""
         self.inbound_tag = f"in_{self.local_port}"
         self.outbound_tag = f"out_{self.local_port}"
+
+
+class HealthStatus(Enum):
+    """代理健康状态枚举"""
+    HEALTHY = "healthy"      # 正常可用
+    DEGRADED = "degraded"    # 降级（曾失败但已恢复，仍需观察）
+    DISABLED = "disabled"    # 禁用（冷却中，不参与路由）
+
+
+@dataclass
+class ProxyHealthState:
+    """
+    代理健康状态模型
+    
+    跟踪单个代理的健康状态、失败次数和罚时信息。
+    """
+    proxy_port: int
+    status: HealthStatus = HealthStatus.HEALTHY
+    failure_count: int = 0          # 连续失败次数
+    penalty_level: int = 0          # 当前罚时等级 (0-3)
+    penalty_until: Optional[datetime] = None  # 罚时结束时间
+    last_check: Optional[datetime] = None     # 最后检测时间
+    last_success: Optional[datetime] = None   # 最后成功时间
+    last_latency_ms: Optional[float] = None   # 最后成功延迟
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        result = {
+            "proxy_port": self.proxy_port,
+            "status": self.status.value,
+            "failure_count": self.failure_count,
+            "penalty_level": self.penalty_level,
+        }
+        if self.penalty_until:
+            result["penalty_until"] = self.penalty_until.isoformat()
+        if self.last_check:
+            result["last_check"] = self.last_check.isoformat()
+        if self.last_success:
+            result["last_success"] = self.last_success.isoformat()
+        if self.last_latency_ms is not None:
+            result["last_latency_ms"] = self.last_latency_ms
+        return result
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProxyHealthState":
+        """从字典创建实例"""
+        status = HealthStatus(data.get("status", "healthy"))
+        penalty_until = None
+        if data.get("penalty_until"):
+            penalty_until = datetime.fromisoformat(data["penalty_until"])
+        last_check = None
+        if data.get("last_check"):
+            last_check = datetime.fromisoformat(data["last_check"])
+        last_success = None
+        if data.get("last_success"):
+            last_success = datetime.fromisoformat(data["last_success"])
+        
+        return cls(
+            proxy_port=data["proxy_port"],
+            status=status,
+            failure_count=data.get("failure_count", 0),
+            penalty_level=data.get("penalty_level", 0),
+            penalty_until=penalty_until,
+            last_check=last_check,
+            last_success=last_success,
+            last_latency_ms=data.get("last_latency_ms"),
+        )
