@@ -86,6 +86,53 @@ class ConfigGenerator:
         logger.info(f"配置已保存到: {output_path}")
         return mappings
     
+    def generate_with_mappings(self, mappings: List[PortMapping]) -> Dict[str, Any]:
+        """
+        使用外部提供的端口映射生成完整的 Xray 配置
+        
+        Args:
+            mappings: 端口映射列表
+            
+        Returns:
+            Xray 配置字典
+        """
+        config = {
+            "log": {
+                "loglevel": "warning"
+            },
+            "inbounds": self._generate_inbounds(mappings),
+            "outbounds": self._generate_outbounds(mappings),
+            "routing": self._generate_routing(mappings)
+        }
+        
+        return config
+    
+    def generate_and_save_with_mappings(
+        self,
+        mappings: List[PortMapping],
+        output_path: str
+    ) -> List[PortMapping]:
+        """
+        使用外部端口映射生成配置并保存到文件
+        
+        Args:
+            mappings: 端口映射列表
+            output_path: 输出文件路径
+            
+        Returns:
+            端口映射列表
+        """
+        config = self.generate_with_mappings(mappings)
+        
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"配置已保存到: {output_path} (使用自定义端口映射)")
+        return mappings
+    
     def _create_port_mappings(self, nodes: List[ProxyNode]) -> List[PortMapping]:
         """创建端口映射列表"""
         mappings = []
