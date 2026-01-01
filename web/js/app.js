@@ -14,6 +14,8 @@ class App {
         this.xrayStatus = 'stopped';
         this.healthStates = {};  // {port: healthState}
         this.healthConfig = null;
+        this.currentTab = 'proxies';  // 'proxies' or 'leases'
+        this.leaseRefreshInterval = null;
 
         // DOM Elements
         this.elements = {
@@ -98,6 +100,20 @@ class App {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') this.closeModals();
         });
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.switchTab(e.target.closest('.tab-btn').dataset.tab));
+        });
+
+        // Lease Playground
+        const pgAcquire = document.getElementById('pg-acquire');
+        const pgRelease = document.getElementById('pg-release');
+        const btnRefreshLeases = document.getElementById('btn-refresh-leases');
+
+        if (pgAcquire) pgAcquire.addEventListener('click', () => this.playgroundAcquire());
+        if (pgRelease) pgRelease.addEventListener('click', () => this.playgroundRelease());
+        if (btnRefreshLeases) btnRefreshLeases.addEventListener('click', () => this.refreshLeaseData());
     }
 
     /**
@@ -912,6 +928,227 @@ class App {
             }
         };
         setTimeout(() => document.addEventListener('click', closeMenu), 0);
+    }
+
+    // ==================== Lease Management ====================
+
+    /**
+     * Switch between Proxies and Leases tabs
+     */
+    switchTab(tabName) {
+        if (this.currentTab === tabName) return;
+        this.currentTab = tabName;
+
+        // Update tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === `${tabName}-tab`);
+        });
+
+        // Load lease data when switching to leases tab
+        if (tabName === 'leases') {
+            this.refreshLeaseData();
+            // Start auto-refresh
+            this.leaseRefreshInterval = setInterval(() => this.refreshLeaseData(), 5000);
+        } else {
+            // Stop auto-refresh when leaving leases tab
+            if (this.leaseRefreshInterval) {
+                clearInterval(this.leaseRefreshInterval);
+                this.leaseRefreshInterval = null;
+            }
+        }
+    }
+
+    /**
+     * Refresh lease data (stats + status)
+     */
+    async refreshLeaseData() {
+        try {
+            const [stats, status] = await Promise.all([
+                api.getLeaseStats(),
+                api.getLeaseStatus()
+            ]);
+
+            this.renderLeaseStats(stats);
+            this.renderActiveLeases(status.active_leases || []);
+            this.renderCooldownPool(status.cooldowns || []);
+        } catch (error) {
+            console.error('Failed to refresh lease data:', error);
+        }
+    }
+
+    /**
+     * Render lease statistics dashboard
+     */
+    renderLeaseStats(stats) {
+        const availableEl = document.getElementById('lease-available');
+        const activeEl = document.getElementById('lease-active');
+        const cooldownEl = document.getElementById('lease-cooldown');
+
+        if (availableEl) availableEl.textContent = stats.total_available_proxies ?? '-';
+        if (activeEl) activeEl.textContent = stats.total_active_leases ?? '-';
+        if (cooldownEl) cooldownEl.textContent = stats.total_cooldowns ?? '-';
+    }
+
+    /**
+     * Render active leases list
+     */
+    renderActiveLeases(leases) {
+        const container = document.getElementById('active-leases-list');
+        if (!container) return;
+
+        if (leases.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state small">
+                    <p>暂无活跃租约</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = leases.map(lease => {
+            const expiresAt = new Date(lease.expires_at);
+            const now = new Date();
+            const remainingSeconds = Math.max(0, Math.floor((expiresAt - now) / 1000));
+            const isExpiring = remainingSeconds < 30;
+
+            return `
+                <div class="lease-item" data-lease-id="${lease.lease_id}">
+                    <span class="lease-item-port">${lease.proxy_port}</span>
+                    <div class="lease-item-info">
+                        <span class="lease-item-workspace">${this.escapeHtml(lease.workspace_id)}</span>
+                        <span class="lease-item-meta">ID: ${lease.lease_id.slice(0, 8)}...</span>
+                    </div>
+                    <span class="lease-item-timer${isExpiring ? ' expiring' : ''}">${this.formatTime(remainingSeconds)}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Render cooldown pool list
+     */
+    renderCooldownPool(cooldowns) {
+        const container = document.getElementById('cooldown-list');
+        if (!container) return;
+
+        if (cooldowns.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state small">
+                    <p>无冷却中的代理</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = cooldowns.map(cd => {
+            const until = new Date(cd.until);
+            const now = new Date();
+            const remainingSeconds = Math.max(0, Math.floor((until - now) / 1000));
+
+            return `
+                <div class="lease-item" data-port="${cd.proxy_port}">
+                    <span class="lease-item-port">${cd.proxy_port}</span>
+                    <div class="lease-item-info">
+                        <span class="lease-item-workspace">${this.escapeHtml(cd.workspace_id)}</span>
+                    </div>
+                    <span class="lease-item-timer">${this.formatTime(remainingSeconds)}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Playground: Acquire a lease
+     */
+    async playgroundAcquire() {
+        const workspaceInput = document.getElementById('pg-workspace');
+        const ttlInput = document.getElementById('pg-ttl');
+        const resultEl = document.getElementById('pg-result');
+
+        const workspaceId = workspaceInput?.value.trim();
+        const ttl = parseInt(ttlInput?.value) || 60;
+
+        if (!workspaceId) {
+            this.showPlaygroundResult({ error: 'Workspace ID is required' }, false);
+            return;
+        }
+
+        try {
+            const result = await api.acquireLease(workspaceId, ttl);
+            this.showPlaygroundResult(result, true);
+
+            // Auto-fill proxy address for release
+            if (result.proxy_address) {
+                const proxyAddressInput = document.getElementById('pg-proxy-address');
+                if (proxyAddressInput) proxyAddressInput.value = result.proxy_address;
+            }
+
+            // Refresh data
+            await this.refreshLeaseData();
+        } catch (error) {
+            this.showPlaygroundResult({ error: error.message }, false);
+        }
+    }
+
+    /**
+     * Playground: Release a lease
+     */
+    async playgroundRelease() {
+        const workspaceInput = document.getElementById('pg-workspace');
+        const proxyAddressInput = document.getElementById('pg-proxy-address');
+        const resultEl = document.getElementById('pg-result');
+
+        const workspaceId = workspaceInput?.value.trim();
+        const proxyAddress = proxyAddressInput?.value.trim();
+
+        if (!workspaceId || !proxyAddress) {
+            this.showPlaygroundResult({ error: 'Workspace ID and Proxy Address are required' }, false);
+            return;
+        }
+
+        try {
+            const result = await api.releaseLease(workspaceId, proxyAddress, 300);
+            this.showPlaygroundResult(result, true);
+
+            // Refresh data
+            await this.refreshLeaseData();
+        } catch (error) {
+            this.showPlaygroundResult({ error: error.message }, false);
+        }
+    }
+
+    /**
+     * Show playground result
+     */
+    showPlaygroundResult(result, success) {
+        const resultEl = document.getElementById('pg-result');
+        if (!resultEl) return;
+
+        resultEl.textContent = JSON.stringify(result, null, 2);
+        resultEl.className = `playground-result ${success ? 'success' : 'error'}`;
+    }
+
+    /**
+     * Format seconds to MM:SS
+     */
+    formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    /**
+     * Escape HTML to prevent XSS
+     */
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 

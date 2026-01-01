@@ -7,5 +7,6 @@ Last Updated: 2026-01-02
 
 ## **✨ Ideas & Improvements**
 
-* [ ] **Web UI**: 实现代理租约 (Lease) 的可视化管理面板。(Phase 3)
-* [ ] **Refactor**: 考虑将 `docs/specs/` 下的文档迁移到标准的 `docs/product/` 和 `docs/tech/` 目录结构中。
+* [ ] **Lease UI Enhancement**: 为 Active Leases 添加 "Force Release" 按钮，允许管理员强制终止租约。
+* [ ] **Lease UI Enhancement**: 为 Cooldown Pool 添加 "Reset Now" 按钮，允许立即清除冷却状态。
+* [ ] **Mobile Responsive**: 优化移动端布局，当前 Tab 在小屏幕上可能显示拥挤。

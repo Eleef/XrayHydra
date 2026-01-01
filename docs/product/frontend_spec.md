@@ -28,7 +28,33 @@
 *   🟡 **Yellow**: Degraded
 *   ⚪ **Gray**: Disabled (Penalty mode)
 
-## **3. Tech Stack (技术栈)**
+## **3. Proxy Lease Management UI (Phase 3)**
+> 目标：提供 Lease API 的可视化监控与调试能力。建议入口：Active Proxies 栏顶部 Tab 切换。
+
+### **3.1 Global Dashboard (统计看板)**
+*   **Metrics**: 
+    *   资源池水位 (Available / Total Healthy)
+    *   当前活跃租约数 (Active Leases)
+    *   当前冷却中数 (Cooldowns)
+    *   Top Workspaces 排行
+
+### **3.2 Active Leases Monitor (租约监控)**
+*   **List View**: Workspace | Proxy Port | TTL Countdown | Actions
+*   **Actions**:
+    *   **Force Release**: 管理员强制终止租约。
+
+### **3.3 Cooldown Pool (冷却池)**
+*   **List View**: Proxy Port | Source Workspace | Cooldown Timer | Actions
+*   **Actions**:
+    *   **Reset Now**: 强制清除冷却状态，立即恢复可用。
+
+### **3.4 Lease Playground (调试器)**
+*   提供一个简易表单，允许开发者在 UI 上模拟 API 调用：
+    *   输入: `Workspace ID`, `TTL`
+    *   操作: `Acquire`, `Release (with cooldown)`
+    *   反馈: 实时显示 API 响应结果 (JSON)。
+
+## **4. Tech Stack (技术栈)**
 *   **HTML5 / CSS3 (Grid Layout)**
 *   **Vanilla JavaScript (ES6+)**
 *   **No Build Tool Required**: 直接由 FastAPI 静态服务托管。

@@ -299,6 +299,57 @@ class ApiClient {
             method: 'POST',
         });
     }
+
+    // ==================== Lease API ====================
+
+    /**
+     * Get lease statistics
+     * @returns {Promise<{total_available_proxies: number, total_active_leases: number, total_cooldowns: number, workspaces: object, proxies_by_usage: Array}>}
+     */
+    async getLeaseStats() {
+        return this.request('/lease/stats');
+    }
+
+    /**
+     * Get lease status (active leases and cooldowns)
+     * @param {string|null} workspaceId - Optional workspace filter
+     * @returns {Promise<{active_leases: Array, cooldowns: Array, total_active: number, total_cooldowns: number}>}
+     */
+    async getLeaseStatus(workspaceId = null) {
+        const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+        return this.request(`/lease/status${query}`);
+    }
+
+    /**
+     * Acquire a proxy lease
+     * @param {string} workspaceId - Workspace identifier
+     * @param {number} ttl - Time to live in seconds
+     * @returns {Promise<{success: boolean, lease_id: string, proxy_address: string, expires_at: string}>}
+     */
+    async acquireLease(workspaceId, ttl = 60) {
+        return this.request('/lease/acquire', {
+            method: 'POST',
+            body: JSON.stringify({ workspace_id: workspaceId, ttl }),
+        });
+    }
+
+    /**
+     * Release a proxy lease
+     * @param {string} workspaceId - Workspace identifier
+     * @param {string} proxyAddress - Proxy address to release (e.g. "127.0.0.1:10000")
+     * @param {number} cooldownSeconds - Cooldown period in seconds
+     * @returns {Promise<{success: boolean, cooldown_until: string|null}>}
+     */
+    async releaseLease(workspaceId, proxyAddress, cooldownSeconds = 300) {
+        return this.request('/lease/release', {
+            method: 'POST',
+            body: JSON.stringify({
+                workspace_id: workspaceId,
+                proxy_address: proxyAddress,
+                cooldown_seconds: cooldownSeconds
+            }),
+        });
+    }
 }
 
 // Export singleton instance

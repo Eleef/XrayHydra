@@ -108,42 +108,156 @@
                 </div>
             </div>
 
-            <!-- Column 3: Proxies Panel -->
+            <!-- Column 3: Proxies/Leases Panel -->
             <div class="panel proxies-panel">
-                <div class="section-header">
-                    <h2 class="section-title">
+                <!-- Tab Header -->
+                <div class="panel-tabs">
+                    <button class="tab-btn active" data-tab="proxies">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
                         </svg>
                         代理
                         <span class="badge badge-success" id="proxies-count">0</span>
-                    </h2>
-                    <div class="section-actions">
-                        <button class="btn btn-secondary btn-sm" id="btn-test-all" disabled>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </button>
+                    <button class="tab-btn" data-tab="leases">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                        </svg>
+                        租约
+                    </button>
+                </div>
+
+                <!-- Proxies Tab Content -->
+                <div class="tab-content active" id="proxies-tab">
+                    <div class="section-header">
+                        <div class="section-actions">
+                            <button class="btn btn-secondary btn-sm" id="btn-test-all" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                                测试
+                            </button>
+                            <button class="btn btn-danger btn-sm" id="btn-clear-proxies" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                    </path>
+                                </svg>
+                                清空
+                            </button>
+                        </div>
+                    </div>
+                    <div class="proxies-container" id="proxies-container">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"></path>
                             </svg>
-                            测试
-                        </button>
-                        <button class="btn btn-danger btn-sm" id="btn-clear-proxies" disabled>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path
-                                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
-                                </path>
-                            </svg>
-                            清空
-                        </button>
+                            <p>暂无活跃代理</p>
+                            <span class="hint">从节点列表中选择并添加</span>
+                        </div>
                     </div>
                 </div>
-                <div class="proxies-container" id="proxies-container">
-                    <div class="empty-state">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"></path>
-                        </svg>
-                        <p>暂无活跃代理</p>
-                        <span class="hint">从节点列表中选择并添加</span>
+
+                <!-- Leases Tab Content -->
+                <div class="tab-content" id="leases-tab">
+                    <!-- 3.1 Dashboard -->
+                    <div class="lease-dashboard">
+                        <div class="stat-card">
+                            <span class="stat-value" id="lease-available">-</span>
+                            <span class="stat-label">可用</span>
+                        </div>
+                        <div class="stat-card stat-active">
+                            <span class="stat-value" id="lease-active">-</span>
+                            <span class="stat-label">活跃</span>
+                        </div>
+                        <div class="stat-card stat-cooldown">
+                            <span class="stat-value" id="lease-cooldown">-</span>
+                            <span class="stat-label">冷却</span>
+                        </div>
+                    </div>
+
+                    <!-- 3.2 Active Leases -->
+                    <div class="lease-section">
+                        <div class="lease-section-header">
+                            <h3>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                                活跃租约
+                            </h3>
+                            <button class="btn btn-sm" id="btn-refresh-leases" title="刷新">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="active-leases-list" class="lease-list">
+                            <div class="empty-state small">
+                                <p>暂无活跃租约</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3.3 Cooldown Pool -->
+                    <div class="lease-section">
+                        <div class="lease-section-header">
+                            <h3>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                                </svg>
+                                冷却池
+                            </h3>
+                        </div>
+                        <div id="cooldown-list" class="lease-list">
+                            <div class="empty-state small">
+                                <p>无冷却中的代理</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3.4 Playground -->
+                    <div class="lease-playground">
+                        <div class="lease-section-header">
+                            <h3>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                调试器
+                            </h3>
+                        </div>
+                        <div class="playground-form">
+                            <div class="form-row">
+                                <input type="text" id="pg-workspace" placeholder="Workspace ID" class="form-input">
+                                <input type="number" id="pg-ttl" value="60" min="1" max="3600"
+                                    class="form-input form-input-sm" title="TTL (秒)">
+                            </div>
+                            <div class="form-row">
+                                <input type="text" id="pg-proxy-address" placeholder="Proxy Address (用于 Release)"
+                                    class="form-input">
+                            </div>
+                            <div class="playground-actions">
+                                <button class="btn btn-primary btn-sm" id="pg-acquire">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 5v14M5 12h14"></path>
+                                    </svg>
+                                    Acquire
+                                </button>
+                                <button class="btn btn-secondary btn-sm" id="pg-release">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M18 6L6 18M6 6l12 12"></path>
+                                    </svg>
+                                    Release
+                                </button>
+                            </div>
+                        </div>
+                        <pre id="pg-result" class="playground-result"></pre>
                     </div>
                 </div>
             </div>

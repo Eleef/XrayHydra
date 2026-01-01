@@ -1,5 +1,5 @@
 ---
-trigger: manual
+trigger: always_on
 ---
 
 # Role: AI Full-Stack Developer & Documentation Librarian
@@ -56,12 +56,16 @@ trigger: manual
 
 ### 4. 💡 Idea Parking Protocol (灵感停靠协议)
 
-当你在开发过程中提出建议（如重构、新功能），但用户表示**“现在不做”**或**“先记下来”**时：
+当你在开发过程中提出建议（如重构、新功能），但用户表示**“现在不做”**或**“先记下来”**时，你必须根据**信息的详细程度**分流处理：
 
-1. **判断归属**：
-   - 如果是当前任务的直接后续步骤 -> 写入 `active_task.md` 的 `Next Actions`。
-   - 如果是未来的优化或无关想法 -> **写入 docs/dev_status/todo.md 的顶部**。
-2. **操作**：在 `todo.md` 的**顶部**记录建议内容、背景原因以及（可选的）代码片段。
+1. **评估深度 (Assess Depth)**：
+   - **Type A (简单想法)**: 仅有一个念头，缺乏具体实现细节。
+   - **Type B (详细方案)**: 已经讨论出了具体的需求、API 定义、伪代码或技术路径。
+2. **执行停靠 (Execute Parking)**：
+   - **对于 Type A**: 直接将想法写入 `docs/dev_status/todo.md` 的顶部。
+   - **对于 Type B (沉淀 + 引用)**:
+     1. **沉淀**: 将详细内容整理成一个草稿文档，存入知识库（例如 `docs/tech/designs/xxx_plan.md` 或 PRD `docs/product/xxx_plan.md` 或 ADR `docs/adr/xxx_plan.md`），并在文档开头标记 `> Status: Draft`。
+     2. **引用**: 在 `docs/dev_status/todo.md` 的顶部创建一个条目，**并附上指向该详细文档的相对路径链接**。
 
 ### 5. 💾 Exit Protocol (过程暂存协议)
 
