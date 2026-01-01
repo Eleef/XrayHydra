@@ -2,7 +2,40 @@
 
 本文件记录 Xray-Prism 项目的所有重要变更。
 
+## [0.5.0] - 2025-12-25
+
+### Added - 代理租约管理 API
+- **api/services/lease_service.py**: 租约管理服务
+  - Workspace 隔离：不同业务域可同时使用同一代理
+  - TTL 租约：自动过期防止资源死锁
+  - 客户端冷却：调用方指定冷却时间
+  - LRU 选择：优先分配最久未使用的代理
+  - 线程安全：threading.Lock 保证并发安全
+- **api/routes/lease.py**: 租约 API 路由
+  - `POST /api/lease/acquire` - 申请代理租约
+  - `POST /api/lease/release` - 归还代理租约
+  - `GET /api/lease/status` - 查看租约状态
+  - `GET /api/lease/stats` - 获取租约统计
+- **api/schemas/lease_models.py**: Pydantic 请求/响应模型
+- **可配置 Token 认证**: 
+  - 默认关闭，开箱即用
+  - 设置 `LEASE_API_TOKEN` 环境变量启用
+
+### Features
+- 🔐 **Workspace 隔离**: 多业务域可并行使用同一代理池
+- ⏱️ **TTL 租约**: 防止调用方崩溃导致资源死锁
+- ❄️ **客户端冷却**: 调用方控制代理休息时间
+- 📊 **LRU 负载均衡**: 自动选择最久未使用的代理
+- 🔑 **可选认证**: 支持 Bearer Token 认证（默认关闭）
+- 📝 **日志可配置**: 支持启用调试日志
+
+### Technical
+- 内存存储 + threading.Lock，无外部依赖
+- 幂等设计：重复归还不报错
+- 与 HealthService 集成：仅分配健康节点
+
 ## [0.4.0] - 2025-12-25
+
 
 ### Changed - UI 重新设计
 - **全新简约明亮主题**: 从暗黑风格改为清新简约的浅色主题

@@ -1,125 +1,102 @@
-# Xray-Prism
+# Xray-Prism 🌐
 
-将 VPN 订阅中的每个节点映射为本地独立端口，实现并发使用不同 IP。
+将 VPN 订阅中的每个节点映射为本地独立端口，实现并发使用不同 IP。内置强大的健康监测系统与代理租约管理 API，专为自动化采集与多任务并发场景设计。
 
-## 功能特性
+## 🌟 功能特性
 
-- ✅ 支持 VMess / VLess / Shadowsocks / Trojan 协议解析
-- ✅ 自动 Base64 解码（含 URL-safe 和 padding 修复）
-- ✅ 每个节点一个独立端口，路由 1 对 1 硬绑定
-- ✅ 自动下载 Xray 内核（支持 Windows/Linux/macOS）
-- ✅ 并发连通性测试，获取出口 IP 和延迟
-- ✅ 优雅的进程管理，支持信号中断
-- ✅ **Web 管理界面**（v0.2.0 新增）
+- 🧪 **全协议支持**: 完美解析 VMess / VLess / Shadowsocks / Trojan 协议（含 Clash YAML 格式）。
+- 🏗️ **端口映射**: 每个节点映射为独立本地端口，路由 1 对 1 硬绑定，真正实现多 IP 并发。
+- 🏥 **自动健康监测**: 
+  - 实时连通性探测，自动剔除失效节点。
+  - **递进式罚时**: 5min → 30min → 150min，确保资源高效利用。
+  - 网络中断容错，避免误判。
+- 🔑 **代理租约 API (v0.5.0)**:
+  - **Workspace 隔离**: 不同业务域可同时使用同一代理，互不干扰。
+  - **TTL 机制**: 租约自动过期，防止调用方崩溃导致资源僵死。
+  - **客户端冷却**: 支持自定义回收后的冷却时间，精细控制使用频率。
+  - **LRU 负载均衡**: 智能分配最久未使用的代理端口。
+- 🎨 **现代化 UI**: 简约明亮的浅色三栏式布局，状态一目了然。
+- ⚙️ **环境隔离**: 支持 `.env` 配置，支持 Bearer Token API 认证。
 
-## 安装
+## 🚀 快速开始
+
+### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 使用方式
+### 2. 环境配置
 
-### 方式一：Web 界面（推荐）
+直接编辑根目录下的 `.env` 文件进行配置：
+```env
+LEASE_API_TOKEN=your_secret_token
+PORT=8000
+```
+在 `.env` 中你可以配置：
+- `LEASE_API_TOKEN`: 启用租约 API 的认证 Token
+- `HOST` / `PORT`: Web 服务器启动参数
 
-启动 Web 服务器：
+### 3. 运行项目
 
+**Web 管理界面（推荐）：**
 ```bash
 python server.py
 ```
+- 访问地址: `http://localhost:8000/`
+- API 文档: `http://localhost:8000/docs`
 
-然后在浏览器中访问：
-- **前端界面**: http://localhost:8000/
-- **API 文档**: http://localhost:8000/docs
-
-Web 界面支持以下功能：
-- 📋 **订阅管理**：添加、删除、刷新订阅
-- 📡 **节点列表**：查看/搜索/选择节点
-- 🚀 **代理管理**：添加节点到代理列表、测试连通性
-- ⚡ **Xray 控制**：一键启动/停止 Xray 服务
-
-### 方式二：命令行 (CLI)
-
+**命令行模式：**
 ```bash
-# 从订阅 URL 获取节点并测试
-python main.py --url "YOUR_SUBSCRIPTION_URL" --test
-
-# 从本地文件读取
-python main.py --file subscription.txt --port 10000 --test
-
-# 保持运行（作为代理服务器）
-python main.py --url "..." --keep-running
+# 获取并测试订阅节点
+python main.py --url "YOUR_SUBSCRIPTION_URL" --test --keep-running
 ```
 
-#### 命令行参数
+## 🔌 代理租约 API 使用示例
 
-| 参数 | 说明 | 默认值 |
-|:---|:---|:---|
-| `--url`, `-u` | 订阅链接 URL | - |
-| `--file`, `-f` | 本地订阅文件路径 | - |
-| `--port`, `-p` | 起始端口号 | 10000 |
-| `--xray-path` | 手动指定 Xray 路径 | 自动查找 |
-| `--download-xray` | 自动下载 Xray 内核 | - |
-| `--test`, `-t` | 运行连通性测试 | - |
-| `--timeout` | 测试超时时间（秒） | 5 |
-| `--workers` | 最大并发测试线程数 | 20 |
-| `--inbound-type` | 入站协议 (http/socks) | http |
-| `--keep-running` | 测试后保持运行 | - |
-| `--verbose`, `-v` | 显示详细日志 | - |
+代理租约 API 是专为自动化爬虫/脚本设计的接口，确保不同任务不会抢占同一个代理。
 
-## 使用示例
-
-启动后，每个节点会映射到一个本地端口：
-
+### 申请代理
 ```bash
-# 使用第一个节点（端口 10000）
-curl -x http://127.0.0.1:10000 https://httpbin.org/ip
-
-# 使用第二个节点（端口 10001）
-curl -x http://127.0.0.1:10001 https://httpbin.org/ip
-
-# Python 中使用
-import requests
-proxies = {"http": "http://127.0.0.1:10000", "https": "http://127.0.0.1:10000"}
-response = requests.get("https://httpbin.org/ip", proxies=proxies)
+curl -X POST http://localhost:8000/api/lease/acquire \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "amazon_crawler", "ttl": 60}'
 ```
 
-## 项目结构
+### 归还代理（带 5 分钟冷却）
+```bash
+curl -X POST http://localhost:8000/api/lease/release \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "amazon_crawler", 
+    "proxy_address": "127.0.0.1:10001", 
+    "cooldown_seconds": 300
+  }'
+```
+
+## 🛠️ 项目结构
 
 ```
 XrayHydra/
-├── main.py              # CLI 程序入口
-├── server.py            # Web 服务入口
-├── config.json          # 生成的 Xray 配置
-├── bin/                 # 自动下载的 Xray 内核
+├── server.py            # Web 服务入口（支持 .env）
+├── main.py              # CLI 核心逻辑
+├── .env                 # 环境配置文件
 ├── api/                 # Web API 层
-│   ├── main.py          # FastAPI 应用
-│   ├── routes/          # API 路由
-│   ├── schemas/         # Pydantic 模型
-│   └── services/        # 业务逻辑
-├── web/                 # 前端静态文件
-│   ├── index.html
-│   ├── css/style.css
-│   └── js/
-├── data/                # 数据存储
-│   ├── subscriptions.json
-│   └── active_proxies.json
-├── src/xray_prism/      # 核心模块
-│   ├── models.py        # 数据模型
-│   ├── fetcher.py       # 订阅获取
-│   ├── parser.py        # 协议解析
-│   ├── generator.py     # 配置生成
-│   ├── runner.py        # 进程管理
-│   └── tester.py        # 连通性测试
-└── tests/               # 单元测试
+│   ├── routes/          # 路由 (lease, health, proxies, ...)
+│   ├── services/        # 业务逻辑 (lease_service, health_service, ...)
+│   └── schemas/         # Pydantic 模型
+├── src/xray_prism/      # 核心逻辑模块
+│   ├── health_monitor.py# 健康监测核心
+│   ├── runner.py        # Xray 进程管理
+│   └── ...
+├── web/                 # 前端 (HTML/JS/CSS)
+└── tests/               # 完整的测试组件 (Unit/Integration/Demo)
 ```
 
-## 依赖
+## 📦 依赖项
 
 - Python 3.10+
-- requests
-- pyyaml
-- fastapi（Web 界面）
-- uvicorn（Web 界面）
-- Xray-core（自动下载或手动指定）
-
+- `fastapi`, `uvicorn`, `pydantic` - 高性能 Web 框架
+- `python-dotenv` - 环境配置管理
+- `requests`, `pyyaml` - 网络与数据解析
+- `Xray-core` - 自动下载管理

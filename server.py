@@ -12,6 +12,11 @@ Examples:
 """
 import argparse
 import uvicorn
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def main():
@@ -28,14 +33,14 @@ Access Points:
     parser.add_argument(
         "--host",
         type=str,
-        default="127.0.0.1",
-        help="Host to bind to (default: 127.0.0.1)"
+        default=os.environ.get("HOST", "127.0.0.1"),
+        help="Host to bind to (default: 127.0.0.1 or HOST env)"
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="Port to bind to (default: 8000)"
+        default=int(os.environ.get("PORT", 8000)),
+        help="Port to bind to (default: 8000 or PORT env)"
     )
     parser.add_argument(
         "--reload",

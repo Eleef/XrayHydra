@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     "enabled": True,
     "check_interval_seconds": 60,
-    "test_target": "http://www.baidu.com",
+    "test_target": "http://ip-api.com/json",  # 与 Web UI 测试一致
     "test_timeout_seconds": 5,
     "max_workers": 20,
     "network_check_targets": [
@@ -31,10 +31,10 @@ DEFAULT_CONFIG = {
         "http://www.taobao.com",
     ],
     "test_targets_presets": [
+        {"name": "IP-API (推荐)", "url": "http://ip-api.com/json"},
+        {"name": "HTTPBin", "url": "https://httpbin.org/ip"},
         {"name": "百度 (国内)", "url": "http://www.baidu.com"},
-        {"name": "淘宝 (国内)", "url": "http://www.taobao.com"},
         {"name": "Google (国外)", "url": "http://www.google.com"},
-        {"name": "Cloudflare (国外)", "url": "http://1.1.1.1"},
     ],
     # 罚时等级（分钟）
     "penalty_levels_minutes": [5, 30, 150],

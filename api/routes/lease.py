@@ -1,0 +1,225 @@
+"""
+Lease API routes.
+Provides endpoints for proxy lease management with workspace isolation.
+
+Authentication:
+    - Disabled by default
+    - Enable by setting LEASE_API_TOKEN environment variable
+    - When enabled, requests must include "Authorization: Bearer <token>" header
+"""
+import os
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query, Depends, Header
+from fastapi.responses import JSONResponse
+
+from api.schemas.lease_models import (
+    LeaseAcquireRequest,
+    LeaseAcquireResponse,
+    LeaseReleaseRequest,
+    LeaseReleaseResponse,
+    LeaseErrorResponse,
+    LeaseStatusResponse,
+    LeaseStatsResponse,
+    ActiveLeaseInfo,
+    CooldownInfo,
+)
+from api.services.lease_service import get_lease_manager
+
+# Configurable authentication
+# Set LEASE_API_TOKEN environment variable to enable
+LEASE_API_TOKEN = os.environ.get("LEASE_API_TOKEN", "")
+
+
+async def verify_token(authorization: Optional[str] = Header(None)):
+    """
+    Verify Bearer token if authentication is enabled.
+    
+    Authentication is disabled by default (LEASE_API_TOKEN not set or empty).
+    When enabled, requires "Authorization: Bearer <token>" header.
+    """
+    # Skip auth if token not configured
+    if not LEASE_API_TOKEN:
+        return None
+    
+    # Token configured - require auth
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Validate Bearer format
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization format. Use: Bearer <token>",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Validate token
+    if parts[1] != LEASE_API_TOKEN:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    return parts[1]
+
+
+router = APIRouter(
+    prefix="/api/lease", 
+    tags=["Lease"],
+    dependencies=[Depends(verify_token)]  # Apply auth to all routes
+)
+
+
+@router.post(
+    "/acquire",
+    response_model=LeaseAcquireResponse,
+    responses={
+        503: {"model": LeaseErrorResponse, "description": "No available proxy"}
+    },
+    summary="申请代理租约",
+    description="""
+    为指定 workspace 申请一个代理租约。
+    
+    - **workspace_id**: 业务隔离标识（不同 workspace 可使用同一代理）
+    - **ttl**: 租约有效时间（秒），超时自动释放
+    
+    返回代理地址和租约ID，或 503 表示无可用代理。
+    """
+)
+async def acquire_lease(request: LeaseAcquireRequest):
+    """Acquire a proxy lease for the given workspace."""
+    manager = get_lease_manager()
+    result = manager.acquire(
+        workspace_id=request.workspace_id,
+        ttl=request.ttl
+    )
+    
+    if not result.success:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": result.error,
+                "message": result.message
+            }
+        )
+    
+    return LeaseAcquireResponse(
+        success=True,
+        lease_id=result.lease_id,
+        proxy_address=f"127.0.0.1:{result.proxy_port}",
+        expires_at=result.expires_at
+    )
+
+
+@router.post(
+    "/release",
+    response_model=LeaseReleaseResponse,
+    summary="归还代理租约",
+    description="""
+    归还代理租约并可选设置冷却期。
+    
+    - **workspace_id**: 业务隔离标识
+    - **proxy_address**: 要归还的代理地址
+    - **cooldown_seconds**: 冷却时间（秒），期间该 workspace 不会再获取此代理
+    
+    幂等设计：重复归还不会报错。
+    """
+)
+async def release_lease(request: LeaseReleaseRequest):
+    """Release a proxy lease and optionally set cooldown."""
+    manager = get_lease_manager()
+    success, cooldown_until = manager.release(
+        workspace_id=request.workspace_id,
+        proxy_address=request.proxy_address,
+        cooldown_seconds=request.cooldown_seconds
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid proxy address format"
+        )
+    
+    return LeaseReleaseResponse(
+        success=True,
+        cooldown_until=cooldown_until
+    )
+
+
+@router.get(
+    "/status",
+    response_model=LeaseStatusResponse,
+    summary="查看租约状态",
+    description="""
+    查看当前租约和冷却状态。
+    
+    - **workspace_id**: 可选，指定则只返回该 workspace 的信息
+    """
+)
+async def get_lease_status(
+    workspace_id: Optional[str] = Query(
+        None, 
+        description="Filter by workspace ID"
+    )
+):
+    """Get current lease and cooldown status."""
+    manager = get_lease_manager()
+    status = manager.get_status(workspace_id=workspace_id)
+    
+    # Convert to response model
+    active_leases = [
+        ActiveLeaseInfo(
+            lease_id=lease["lease_id"],
+            workspace_id=lease["workspace_id"],
+            proxy_port=lease["proxy_port"],
+            proxy_address=lease["proxy_address"],
+            acquired_at=lease["acquired_at"],
+            expires_at=lease["expires_at"]
+        )
+        for lease in status["active_leases"]
+    ]
+    
+    cooldowns = [
+        CooldownInfo(
+            workspace_id=cd["workspace_id"],
+            proxy_port=cd["proxy_port"],
+            until=cd["until"],
+            set_at=cd["set_at"]
+        )
+        for cd in status["cooldowns"]
+    ]
+    
+    return LeaseStatusResponse(
+        workspace_id=status["workspace_id"],
+        active_leases=active_leases,
+        cooldowns=cooldowns,
+        total_active=status["total_active"],
+        total_cooldowns=status["total_cooldowns"]
+    )
+
+
+@router.get(
+    "/stats",
+    response_model=LeaseStatsResponse,
+    summary="获取租约统计",
+    description="获取租约系统的统计信息，包括可用代理数、活跃租约数、使用频率等。"
+)
+async def get_lease_stats():
+    """Get lease statistics."""
+    manager = get_lease_manager()
+    stats = manager.get_stats()
+    
+    return LeaseStatsResponse(
+        total_available_proxies=stats["total_available_proxies"],
+        total_active_leases=stats["total_active_leases"],
+        total_cooldowns=stats["total_cooldowns"],
+        workspaces=stats["workspaces"],
+        proxies_by_usage=stats["proxies_by_usage"]
+    )
