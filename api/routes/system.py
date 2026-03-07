@@ -1,12 +1,13 @@
 """
 System control API routes.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from api.schemas.models import (
     SystemStatusResponse,
     SystemActionResponse,
-    XrayStatus
+    XrayStatus,
+    ErrorResponse,
 )
 from api.services.proxy_service import get_proxy_service
 from api.services.subscription_service import get_subscription_service
@@ -14,7 +15,7 @@ from api.services.subscription_service import get_subscription_service
 router = APIRouter(prefix="/api/system", tags=["System"])
 
 
-@router.get("/status", response_model=SystemStatusResponse)
+@router.get("/status", response_model=SystemStatusResponse, operation_id="getSystemStatus")
 async def get_system_status():
     """Get overall system status."""
     proxy_service = get_proxy_service()
@@ -34,7 +35,12 @@ async def get_system_status():
     )
 
 
-@router.post("/start", response_model=SystemActionResponse)
+@router.post(
+    "/start",
+    response_model=SystemActionResponse,
+    responses={400: {"model": ErrorResponse, "description": "System start failed"}},
+    operation_id="startXray"
+)
 async def start_xray():
     """Start the Xray process."""
     service = get_proxy_service()
@@ -47,7 +53,12 @@ async def start_xray():
     )
 
 
-@router.post("/stop", response_model=SystemActionResponse)
+@router.post(
+    "/stop",
+    response_model=SystemActionResponse,
+    responses={400: {"model": ErrorResponse, "description": "System stop failed"}},
+    operation_id="stopXray"
+)
 async def stop_xray():
     """Stop the Xray process."""
     service = get_proxy_service()
@@ -60,7 +71,12 @@ async def stop_xray():
     )
 
 
-@router.post("/restart", response_model=SystemActionResponse)
+@router.post(
+    "/restart",
+    response_model=SystemActionResponse,
+    responses={400: {"model": ErrorResponse, "description": "System restart failed"}},
+    operation_id="restartXray"
+)
 async def restart_xray():
     """Restart the Xray process."""
     service = get_proxy_service()

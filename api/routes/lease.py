@@ -9,8 +9,9 @@ Authentication:
 """
 import os
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Depends, Header
+from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.schemas.lease_models import (
     LeaseAcquireRequest,
@@ -24,13 +25,22 @@ from api.schemas.lease_models import (
     CooldownInfo,
 )
 from api.services.lease_service import get_lease_manager
+from api.schemas.models import ErrorResponse
+from api.services.proxy_service import build_proxy_access_fields
 
 # Configurable authentication
 # Set LEASE_API_TOKEN environment variable to enable
 LEASE_API_TOKEN = os.environ.get("LEASE_API_TOKEN", "")
+lease_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="LeaseBearerAuth",
+    description="Optional Bearer token for Lease API. Required only when LEASE_API_TOKEN is configured on the server."
+)
 
 
-async def verify_token(authorization: Optional[str] = Header(None)):
+async def verify_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(lease_bearer_scheme)
+):
     """
     Verify Bearer token if authentication is enabled.
     
@@ -42,37 +52,28 @@ async def verify_token(authorization: Optional[str] = Header(None)):
         return None
     
     # Token configured - require auth
-    if not authorization:
+    if credentials is None:
         raise HTTPException(
             status_code=401,
             detail="Authorization header required",
             headers={"WWW-Authenticate": "Bearer"}
         )
-    
-    # Validate Bearer format
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authorization format. Use: Bearer <token>",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
+
     # Validate token
-    if parts[1] != LEASE_API_TOKEN:
+    if credentials.credentials != LEASE_API_TOKEN:
         raise HTTPException(
             status_code=401,
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
-    return parts[1]
+    return credentials.credentials
 
 
 router = APIRouter(
     prefix="/api/lease", 
     tags=["Lease"],
-    dependencies=[Depends(verify_token)]  # Apply auth to all routes
+    dependencies=[Security(verify_token)]  # Apply auth to all routes
 )
 
 
@@ -80,8 +81,10 @@ router = APIRouter(
     "/acquire",
     response_model=LeaseAcquireResponse,
     responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
         503: {"model": LeaseErrorResponse, "description": "No available proxy"}
     },
+    operation_id="acquireLease",
     summary="申请代理租约",
     description="""
     为指定 workspace 申请一个代理租约。
@@ -113,14 +116,19 @@ async def acquire_lease(request: LeaseAcquireRequest):
     return LeaseAcquireResponse(
         success=True,
         lease_id=result.lease_id,
-        proxy_address=f"127.0.0.1:{result.proxy_port}",
-        expires_at=result.expires_at
+        expires_at=result.expires_at,
+        **build_proxy_access_fields(result.proxy_port)
     )
 
 
 @router.post(
     "/release",
     response_model=LeaseReleaseResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid release request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"}
+    },
+    operation_id="releaseLease",
     summary="归还代理租约",
     description="""
     归还代理租约并可选设置冷却期。
@@ -156,6 +164,10 @@ async def release_lease(request: LeaseReleaseRequest):
 @router.get(
     "/status",
     response_model=LeaseStatusResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"}
+    },
+    operation_id="getLeaseStatus",
     summary="查看租约状态",
     description="""
     查看当前租约和冷却状态。
@@ -179,9 +191,9 @@ async def get_lease_status(
             lease_id=lease["lease_id"],
             workspace_id=lease["workspace_id"],
             proxy_port=lease["proxy_port"],
-            proxy_address=lease["proxy_address"],
             acquired_at=lease["acquired_at"],
-            expires_at=lease["expires_at"]
+            expires_at=lease["expires_at"],
+            **build_proxy_access_fields(lease["proxy_port"])
         )
         for lease in status["active_leases"]
     ]
@@ -208,6 +220,10 @@ async def get_lease_status(
 @router.get(
     "/stats",
     response_model=LeaseStatsResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"}
+    },
+    operation_id="getLeaseStats",
     summary="获取租约统计",
     description="获取租约系统的统计信息，包括可用代理数、活跃租约数、使用频率等。"
 )

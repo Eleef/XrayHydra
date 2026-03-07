@@ -2,6 +2,37 @@
 
 本文件记录 Xray-Prism 项目的所有重要变更。
 
+## [Unreleased]
+
+### Fixed
+- **跨平台 Xray 进程管理**
+  - `src/xray_prism/runner.py` 改为项目级进程跟踪，只回收当前项目自己启动的 Xray。
+  - 避免在 Windows / Linux 下全局误杀同机其他 Xray 进程。
+- **订阅创建持久化语义**
+  - `api/services/subscription_service.py` 改为抓取成功后再落盘。
+  - 抓取或解析失败时不再留下空订阅记录。
+- **代理健康状态同步**
+  - `api/services/proxy_service.py` 现在会在添加/删除代理、启动/停止 Xray 时同步健康状态。
+  - Xray 停止后会清空可分配健康端口，避免 Lease API 继续发放失效地址。
+
+### Added
+- **单元测试**
+  - `tests/test_runner.py`：覆盖项目级 Xray 进程跟踪与回收。
+  - `tests/test_subscription_service.py`：覆盖订阅创建原子性。
+  - `tests/test_proxy_service.py`：覆盖代理与健康状态同步，以及 mixed-port 配置生成。
+- **OpenAPI 契约增强**
+  - 为客户端接口补充稳定 `operationId`、标准 Bearer 安全方案、Schema 示例和错误响应模型。
+  - 新增 `tests/test_openapi.py` 保障 `/openapi.json` 契约稳定。
+- **Python SDK**
+  - 新增 `scripts/generate_python_sdk.py`，可从当前 OpenAPI 重新生成客户端代码。
+  - 新增 `sdk/python` 本地 Python SDK 包和 `tests/test_python_sdk.py` 烟雾测试。
+  - 生成脚本默认不再提交 `sdk/python/openapi.json`，仅在需要时按参数导出，减少大文件对 AI 上下文和代码审查的影响。
+
+### Changed
+- **Mixed-port 本地代理端口**
+  - `api/services/proxy_service.py` 生成 Xray 配置时改用 `socks` inbound，使同一 `127.0.0.1:<port>` 可同时被 HTTP 与 SOCKS5 客户端使用。
+  - Proxy / Lease API 现在显式返回 `proxy_scheme`、`supported_proxy_protocols`、`http_proxy_url`、`socks5_proxy_url`，避免调用方根据 `host:port` 猜协议。
+
 ## [0.5.0] - 2025-12-25
 
 ### Added - 代理租约管理 API

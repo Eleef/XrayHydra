@@ -6,11 +6,14 @@ Xray-Prism 进程管理层
 """
 
 import logging
+import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -74,8 +77,236 @@ class XrayRunner:
         """
         self.project_dir = Path(project_dir) if project_dir else Path.cwd()
         self.xray_dir = self.project_dir / "bin"
+        self.data_dir = self.project_dir / "data"
+        self.process_info_file = self.data_dir / "xray_runner.json"
         self._xray_path = xray_path
         self._process: Optional[subprocess.Popen] = None
+
+    def _normalize_path(self, path: Optional[str]) -> Optional[str]:
+        """标准化路径，便于跨平台比较。"""
+        if not path:
+            return None
+
+        normalized = str(Path(path).resolve(strict=False))
+        if platform.system().lower() == "windows":
+            return normalized.lower()
+        return normalized
+
+    def _read_process_metadata(self) -> Optional[dict]:
+        """读取上次启动的 Xray 进程元数据。"""
+        if not self.process_info_file.exists():
+            return None
+
+        try:
+            with open(self.process_info_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"读取进程元数据失败: {e}")
+            return None
+
+    def _write_process_metadata(self, pid: int, xray_path: str, config_path: str) -> None:
+        """保存当前启动的 Xray 进程元数据。"""
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "pid": pid,
+            "xray_path": str(Path(xray_path).resolve(strict=False)),
+            "config_path": str(Path(config_path).resolve(strict=False)),
+        }
+        with open(self.process_info_file, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+    def _clear_process_metadata(self) -> None:
+        """删除进程元数据文件。"""
+        try:
+            if self.process_info_file.exists():
+                self.process_info_file.unlink()
+        except Exception as e:
+            logger.warning(f"删除进程元数据失败: {e}")
+
+    def _pid_exists(self, pid: int) -> bool:
+        """检查进程是否存在。"""
+        if pid <= 0:
+            return False
+
+        if platform.system().lower() == "windows":
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                STILL_ACTIVE = 259
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+                handle = kernel32.OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                    False,
+                    pid
+                )
+                if not handle:
+                    return False
+
+                try:
+                    exit_code = wintypes.DWORD()
+                    if not kernel32.GetExitCodeProcess(
+                        wintypes.HANDLE(handle),
+                        ctypes.byref(exit_code)
+                    ):
+                        return False
+                    return exit_code.value == STILL_ACTIVE
+                finally:
+                    kernel32.CloseHandle(wintypes.HANDLE(handle))
+            except Exception:
+                return False
+
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _get_process_executable(self, pid: int) -> Optional[str]:
+        """获取进程可执行文件路径。"""
+        system = platform.system().lower()
+
+        if system == "linux":
+            try:
+                return str(Path(f"/proc/{pid}/exe").resolve(strict=True))
+            except OSError:
+                return None
+
+        if system == "windows":
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+                handle = kernel32.OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                    False,
+                    pid
+                )
+                if not handle:
+                    return None
+
+                try:
+                    size = wintypes.DWORD(32768)
+                    buffer = ctypes.create_unicode_buffer(size.value)
+                    success = kernel32.QueryFullProcessImageNameW(
+                        wintypes.HANDLE(handle),
+                        0,
+                        buffer,
+                        ctypes.byref(size)
+                    )
+                    if not success:
+                        return None
+                    return buffer.value
+                finally:
+                    kernel32.CloseHandle(wintypes.HANDLE(handle))
+            except Exception:
+                return None
+
+        return None
+
+    def _get_process_cmdline(self, pid: int) -> Optional[list[str]]:
+        """获取进程命令行参数。当前仅在 Linux 下启用更严格校验。"""
+        if platform.system().lower() != "linux":
+            return None
+
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            return None
+
+        parts = [part.decode("utf-8", errors="ignore") for part in raw.split(b"\0") if part]
+        return parts or None
+
+    def _get_tracked_process_pid(self) -> Optional[int]:
+        """
+        返回可安全接管的旧进程 PID。
+
+        只有当 PID 仍然存在，且可执行文件与记录一致时才会返回。
+        在 Linux 下还会进一步比对 config 路径，降低误杀风险。
+        """
+        metadata = self._read_process_metadata()
+        if not metadata:
+            return None
+
+        pid = metadata.get("pid")
+        if not isinstance(pid, int) or pid <= 0:
+            self._clear_process_metadata()
+            return None
+
+        if not self._pid_exists(pid):
+            self._clear_process_metadata()
+            return None
+
+        expected_exe = self._normalize_path(metadata.get("xray_path"))
+        actual_exe = self._normalize_path(self._get_process_executable(pid))
+        if not expected_exe or not actual_exe:
+            return None
+
+        if actual_exe != expected_exe:
+            self._clear_process_metadata()
+            return None
+
+        expected_config = self._normalize_path(metadata.get("config_path"))
+        cmdline = self._get_process_cmdline(pid)
+        if expected_config and cmdline:
+            normalized_cmdline = [self._normalize_path(arg) for arg in cmdline]
+            if expected_config not in normalized_cmdline:
+                logger.warning(f"检测到同名 Xray 进程但配置不匹配，跳过接管: PID {pid}")
+                return None
+
+        return pid
+
+    def _terminate_pid(self, pid: int, timeout: int = 5) -> None:
+        """按 PID 终止进程，兼容 Windows 和 Linux。"""
+        if not self._pid_exists(pid):
+            return
+
+        logger.info(f"正在终止 Xray 进程 PID: {pid}")
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not self._pid_exists(pid):
+                return
+            time.sleep(0.1)
+
+        if hasattr(signal, "SIGKILL"):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return
+
+            deadline = time.time() + 2
+            while time.time() < deadline:
+                if not self._pid_exists(pid):
+                    return
+                time.sleep(0.1)
+
+        raise TimeoutError(f"Xray 进程未能在限定时间内退出: PID {pid}")
+
+    def _stop_tracked_process(self) -> bool:
+        """停止由当前项目上次启动并记录在元数据中的 Xray 进程。"""
+        tracked_pid = self._get_tracked_process_pid()
+        if tracked_pid is None:
+            return False
+
+        self._terminate_pid(tracked_pid)
+        self._clear_process_metadata()
+        logger.info(f"已停止上次记录的 Xray 进程: PID {tracked_pid}")
+        return True
     
     @property
     def xray_path(self) -> str:
@@ -197,31 +428,6 @@ class XrayRunner:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
     
-    def _cleanup_orphan_processes(self) -> None:
-        """清理可能存在的僵尸 Xray 进程"""
-        try:
-            if platform.system().lower() == "windows":
-                # Windows: 使用 taskkill 杀掉所有 xray.exe 进程
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "xray.exe"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5
-                )
-                logger.debug("已清理遗留的 xray.exe 进程")
-            else:
-                # Linux/macOS: 使用 pkill
-                subprocess.run(
-                    ["pkill", "-9", "xray"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5
-                )
-                logger.debug("已清理遗留的 xray 进程")
-        except Exception as e:
-            # 如果清理失败也继续执行（可能没有遗留进程）
-            logger.debug(f"清理遗留进程时出错（可忽略）: {e}")
-    
     def start(self, config_path: str) -> subprocess.Popen:
         """
         启动 Xray 进程
@@ -235,9 +441,9 @@ class XrayRunner:
         if self._process and self._process.poll() is None:
             logger.warning("Xray 已在运行，先停止现有进程")
             self.stop()
-        
-        # 清理可能存在的僵尸进程（防止服务重启后的遗留进程）
-        self._cleanup_orphan_processes()
+        else:
+            # 服务重启后尝试接管并停止自己上次启动的 Xray，避免误伤其他实例。
+            self._stop_tracked_process()
         
         xray = self.xray_path
         config = Path(config_path).absolute()
@@ -249,20 +455,33 @@ class XrayRunner:
         logger.info(f"启动 Xray: {' '.join(cmd)}")
         
         # 启动进程，重定向输出
+        creationflags = 0
+        start_new_session = False
+        if platform.system() == "Windows":
+            creationflags = (
+                getattr(subprocess, "CREATE_NO_WINDOW", 0) |
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
+        else:
+            start_new_session = True
+
         self._process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            creationflags=creationflags,
+            start_new_session=start_new_session
         )
         
+        self._write_process_metadata(self._process.pid, xray, str(config))
         logger.info(f"Xray 已启动，PID: {self._process.pid}")
         return self._process
     
     def stop(self) -> None:
         """停止 Xray 进程"""
         if self._process is None:
-            logger.debug("没有运行中的 Xray 进程")
+            if not self._stop_tracked_process():
+                logger.debug("没有运行中的 Xray 进程")
             return
         
         if self._process.poll() is None:
@@ -277,11 +496,17 @@ class XrayRunner:
                 self._process.wait()
         
         self._process = None
+        self._clear_process_metadata()
         logger.info("Xray 已停止")
     
     def is_running(self) -> bool:
         """检查 Xray 是否正在运行"""
-        return self._process is not None and self._process.poll() is None
+        if self._process is not None:
+            if self._process.poll() is None:
+                return True
+            self._process = None
+
+        return self._get_tracked_process_pid() is not None
     
     def get_output(self) -> tuple:
         """获取进程输出"""

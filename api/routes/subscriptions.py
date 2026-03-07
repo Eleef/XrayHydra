@@ -2,7 +2,6 @@
 Subscription management API routes.
 """
 from fastapi import APIRouter, HTTPException, status
-from typing import List
 
 from api.schemas.models import (
     SubscriptionCreate,
@@ -18,7 +17,11 @@ from api.services.subscription_service import get_subscription_service
 router = APIRouter(prefix="/api/subscriptions", tags=["Subscriptions"])
 
 
-@router.get("", response_model=SubscriptionListResponse)
+@router.get(
+    "",
+    response_model=SubscriptionListResponse,
+    operation_id="listSubscriptions"
+)
 async def get_subscriptions():
     """Get all subscriptions."""
     service = get_subscription_service()
@@ -29,7 +32,13 @@ async def get_subscriptions():
     )
 
 
-@router.post("", response_model=SubscriptionResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=SubscriptionResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={400: {"model": ErrorResponse, "description": "Invalid subscription payload"}},
+    operation_id="createSubscription"
+)
 async def create_subscription(data: SubscriptionCreate):
     """Create a new subscription and fetch its nodes."""
     service = get_subscription_service()
@@ -44,7 +53,12 @@ async def create_subscription(data: SubscriptionCreate):
         )
 
 
-@router.get("/{sub_id}", response_model=SubscriptionResponse)
+@router.get(
+    "/{sub_id}",
+    response_model=SubscriptionResponse,
+    responses={404: {"model": ErrorResponse, "description": "Subscription not found"}},
+    operation_id="getSubscription"
+)
 async def get_subscription(sub_id: str):
     """Get a subscription by ID."""
     service = get_subscription_service()
@@ -59,7 +73,12 @@ async def get_subscription(sub_id: str):
     return SubscriptionResponse(**result)
 
 
-@router.delete("/{sub_id}", response_model=SuccessResponse)
+@router.delete(
+    "/{sub_id}",
+    response_model=SuccessResponse,
+    responses={404: {"model": ErrorResponse, "description": "Subscription not found"}},
+    operation_id="deleteSubscription"
+)
 async def delete_subscription(sub_id: str):
     """Delete a subscription and all its nodes."""
     service = get_subscription_service()
@@ -73,7 +92,15 @@ async def delete_subscription(sub_id: str):
     return SuccessResponse(message=f"Subscription {sub_id} deleted successfully")
 
 
-@router.post("/{sub_id}/refresh", response_model=SubscriptionResponse)
+@router.post(
+    "/{sub_id}/refresh",
+    response_model=SubscriptionResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Refresh failed"},
+        404: {"model": ErrorResponse, "description": "Subscription not found"}
+    },
+    operation_id="refreshSubscription"
+)
 async def refresh_subscription(sub_id: str):
     """Refresh a subscription's nodes from the source URL."""
     service = get_subscription_service()
@@ -93,7 +120,12 @@ async def refresh_subscription(sub_id: str):
         )
 
 
-@router.get("/{sub_id}/nodes", response_model=NodeListResponse)
+@router.get(
+    "/{sub_id}/nodes",
+    response_model=NodeListResponse,
+    responses={404: {"model": ErrorResponse, "description": "Subscription not found"}},
+    operation_id="listSubscriptionNodes"
+)
 async def get_subscription_nodes(sub_id: str):
     """Get all nodes for a subscription."""
     service = get_subscription_service()

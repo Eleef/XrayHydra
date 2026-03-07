@@ -3,11 +3,11 @@ Subscription management service.
 Handles CRUD operations for subscriptions and their nodes.
 """
 import json
-import os
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 import sys
 
 # Add project root to path for imports
@@ -17,6 +17,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.xray_prism.fetcher import fetch_subscription
 from src.xray_prism.parser import parse_subscription
 from src.xray_prism.models import ProxyNode
+
+logger = logging.getLogger(__name__)
 
 
 class SubscriptionService:
@@ -99,22 +101,17 @@ class SubscriptionService:
         
         sub_id = f"sub_{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
-        
-        # Save subscription first
+
+        nodes_data = self._fetch_subscription_nodes_data(sub_id, url)
+
         self._data["subscriptions"][sub_id] = {
             "name": name,
             "url": url,
             "created_at": now,
-            "last_updated": None
+            "last_updated": now
         }
+        self._data["nodes"].update(nodes_data)
         self._save_data()
-        
-        # Fetch and parse nodes
-        try:
-            self._refresh_subscription_nodes(sub_id, url)
-        except Exception as e:
-            # Subscription created but nodes failed to fetch
-            print(f"Warning: Failed to fetch nodes for {name}: {e}")
         
         return self.get_subscription(sub_id)
     
@@ -150,8 +147,8 @@ class SubscriptionService:
         self._refresh_subscription_nodes(sub_id, sub_data["url"])
         return self.get_subscription(sub_id)
     
-    def _refresh_subscription_nodes(self, sub_id: str, url: str):
-        """Fetch and update nodes for a subscription."""
+    def _fetch_subscription_nodes_data(self, sub_id: str, url: str) -> Dict[str, Dict]:
+        """Fetch and parse subscription nodes without mutating persisted state."""
         # Fetch subscription content
         content = fetch_subscription(url=url)
         if not content:
@@ -161,19 +158,11 @@ class SubscriptionService:
         nodes: List[ProxyNode] = parse_subscription(content)
         if not nodes:
             raise ValueError("No nodes found in subscription")
-        
-        # Remove old nodes for this subscription
-        nodes_to_remove = [
-            node_id for node_id, node_data in self._data.get("nodes", {}).items()
-            if node_data.get("subscription_id") == sub_id
-        ]
-        for node_id in nodes_to_remove:
-            del self._data["nodes"][node_id]
-        
-        # Add new nodes
+
+        nodes_data: Dict[str, Dict] = {}
         for idx, node in enumerate(nodes):
             node_id = f"node_{sub_id}_{idx:04d}"
-            self._data["nodes"][node_id] = {
+            nodes_data[node_id] = {
                 "subscription_id": sub_id,
                 "name": node.name,
                 "protocol": node.protocol.value,
@@ -195,8 +184,22 @@ class SubscriptionService:
                 "exit_ip": None,
                 "exit_country": None
             }
-        
-        # Update subscription timestamp
+
+        return nodes_data
+
+    def _refresh_subscription_nodes(self, sub_id: str, url: str):
+        """Fetch and update nodes for a subscription."""
+        nodes_data = self._fetch_subscription_nodes_data(sub_id, url)
+
+        # Remove old nodes for this subscription only after the new payload is ready.
+        nodes_to_remove = [
+            node_id for node_id, node_data in self._data.get("nodes", {}).items()
+            if node_data.get("subscription_id") == sub_id
+        ]
+        for node_id in nodes_to_remove:
+            del self._data["nodes"][node_id]
+
+        self._data["nodes"].update(nodes_data)
         self._data["subscriptions"][sub_id]["last_updated"] = datetime.now().isoformat()
         self._save_data()
     

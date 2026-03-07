@@ -10,8 +10,8 @@ from api.schemas.models import (
     HealthConfigUpdate,
     ProxyHealthResponse,
     SuccessResponse,
-    HealthStatusEnum,
     TestTargetPreset,
+    ErrorResponse,
 )
 from api.services.health_service import get_health_service
 from api.services.proxy_service import get_proxy_service
@@ -19,7 +19,7 @@ from api.services.proxy_service import get_proxy_service
 router = APIRouter(prefix="/api/health", tags=["Health"])
 
 
-@router.get("/status", response_model=HealthStatusListResponse)
+@router.get("/status", response_model=HealthStatusListResponse, operation_id="getHealthStatus")
 async def get_health_status():
     """Get health status for all monitored proxies."""
     service = get_health_service()
@@ -39,7 +39,12 @@ async def get_health_status():
     )
 
 
-@router.get("/status/{port}", response_model=ProxyHealthResponse)
+@router.get(
+    "/status/{port}",
+    response_model=ProxyHealthResponse,
+    responses={404: {"model": ErrorResponse, "description": "Health state not found"}},
+    operation_id="getProxyHealthStatus"
+)
 async def get_proxy_health_status(port: int):
     """Get health status for a specific proxy."""
     service = get_health_service()
@@ -54,7 +59,7 @@ async def get_proxy_health_status(port: int):
     return ProxyHealthResponse(**state)
 
 
-@router.get("/config", response_model=HealthConfigResponse)
+@router.get("/config", response_model=HealthConfigResponse, operation_id="getHealthConfig")
 async def get_health_config():
     """Get health monitoring configuration."""
     service = get_health_service()
@@ -73,7 +78,7 @@ async def get_health_config():
     )
 
 
-@router.put("/config", response_model=HealthConfigResponse)
+@router.put("/config", response_model=HealthConfigResponse, operation_id="updateHealthConfig")
 async def update_health_config(data: HealthConfigUpdate):
     """Update health monitoring configuration."""
     service = get_health_service()
@@ -98,7 +103,12 @@ async def update_health_config(data: HealthConfigUpdate):
     )
 
 
-@router.post("/reset/{port}", response_model=SuccessResponse)
+@router.post(
+    "/reset/{port}",
+    response_model=SuccessResponse,
+    responses={404: {"model": ErrorResponse, "description": "Health state not found"}},
+    operation_id="resetProxyHealth"
+)
 async def reset_proxy_health(port: int):
     """Reset health state for a specific proxy."""
     service = get_health_service()
@@ -112,7 +122,7 @@ async def reset_proxy_health(port: int):
     return SuccessResponse(message=f"Health state for port {port} reset successfully")
 
 
-@router.post("/reset-all", response_model=SuccessResponse)
+@router.post("/reset-all", response_model=SuccessResponse, operation_id="resetAllHealth")
 async def reset_all_health():
     """Reset health states for all proxies."""
     service = get_health_service()
@@ -120,7 +130,7 @@ async def reset_all_health():
     return SuccessResponse(message=f"Reset health states for {count} proxies")
 
 
-@router.post("/check", response_model=HealthStatusListResponse)
+@router.post("/check", response_model=HealthStatusListResponse, operation_id="runHealthCheck")
 async def run_health_check():
     """
     Manually trigger a health check on all active proxies.
@@ -159,7 +169,7 @@ async def run_health_check():
     )
 
 
-@router.post("/monitoring/start", response_model=SuccessResponse)
+@router.post("/monitoring/start", response_model=SuccessResponse, operation_id="startHealthMonitoring")
 async def start_monitoring():
     """Start background health monitoring."""
     health_service = get_health_service()
@@ -175,7 +185,7 @@ async def start_monitoring():
         return SuccessResponse(message="Health monitoring already running")
 
 
-@router.post("/monitoring/stop", response_model=SuccessResponse)
+@router.post("/monitoring/stop", response_model=SuccessResponse, operation_id="stopHealthMonitoring")
 async def stop_monitoring():
     """Stop background health monitoring."""
     service = get_health_service()

@@ -10,14 +10,15 @@ from api.schemas.models import (
     ProxyListResponse,
     ProxyTestAllResponse,
     NodeTestResult,
-    SuccessResponse
+    SuccessResponse,
+    ErrorResponse,
 )
 from api.services.proxy_service import get_proxy_service
 
 router = APIRouter(prefix="/api/proxies", tags=["Proxies"])
 
 
-@router.get("", response_model=ProxyListResponse)
+@router.get("", response_model=ProxyListResponse, operation_id="listProxies")
 async def get_proxies():
     """Get all active proxies."""
     service = get_proxy_service()
@@ -25,23 +26,30 @@ async def get_proxies():
     xray_status = service.get_xray_status()
     
     return ProxyListResponse(
-        proxies=[ProxyResponse(
-            port=p["port"],
-            node_id=p["node_id"],
-            node_name=p["node_name"],
-            protocol=p["protocol"],
-            address=p["address"],
-            server_port=p["server_port"],
-            test_status=p.get("test_status", "pending"),
-            latency_ms=p.get("latency_ms"),
-            exit_ip=p.get("exit_ip")
-        ) for p in proxies],
+        proxies=[ProxyResponse(**{
+            **service.build_proxy_access_fields(p["port"]),
+            "port": p["port"],
+            "node_id": p["node_id"],
+            "node_name": p["node_name"],
+            "protocol": p["protocol"],
+            "address": p["address"],
+            "server_port": p["server_port"],
+            "test_status": p.get("test_status", "pending"),
+            "latency_ms": p.get("latency_ms"),
+            "exit_ip": p.get("exit_ip")
+        }) for p in proxies],
         total=len(proxies),
         xray_status=xray_status
     )
 
 
-@router.post("", response_model=List[ProxyResponse], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=List[ProxyResponse],
+    status_code=status.HTTP_201_CREATED,
+    responses={400: {"model": ErrorResponse, "description": "Invalid proxy request"}},
+    operation_id="addProxies"
+)
 async def add_proxies(data: ProxyAddRequest):
     """Add nodes to the active proxy list."""
     service = get_proxy_service()
@@ -54,15 +62,16 @@ async def add_proxies(data: ProxyAddRequest):
                 detail="No new proxies added (nodes may already be in proxy list)"
             )
         
-        return [ProxyResponse(
-            port=p["port"],
-            node_id=p["node_id"],
-            node_name=p["node_name"],
-            protocol=p["protocol"],
-            address=p["address"],
-            server_port=p["server_port"],
-            test_status=p.get("test_status", "pending")
-        ) for p in new_proxies]
+        return [ProxyResponse(**{
+            **service.build_proxy_access_fields(p["port"]),
+            "port": p["port"],
+            "node_id": p["node_id"],
+            "node_name": p["node_name"],
+            "protocol": p["protocol"],
+            "address": p["address"],
+            "server_port": p["server_port"],
+            "test_status": p.get("test_status", "pending")
+        }) for p in new_proxies]
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -70,7 +79,12 @@ async def add_proxies(data: ProxyAddRequest):
         )
 
 
-@router.delete("/{port}", response_model=SuccessResponse)
+@router.delete(
+    "/{port}",
+    response_model=SuccessResponse,
+    responses={404: {"model": ErrorResponse, "description": "Proxy not found"}},
+    operation_id="removeProxy"
+)
 async def remove_proxy(port: int):
     """Remove a proxy by port."""
     service = get_proxy_service()
@@ -84,7 +98,7 @@ async def remove_proxy(port: int):
     return SuccessResponse(message=f"Proxy on port {port} removed successfully")
 
 
-@router.delete("", response_model=SuccessResponse)
+@router.delete("", response_model=SuccessResponse, operation_id="clearAllProxies")
 async def clear_all_proxies():
     """Remove all proxies."""
     service = get_proxy_service()
@@ -92,7 +106,12 @@ async def clear_all_proxies():
     return SuccessResponse(message=f"Removed {count} proxies")
 
 
-@router.post("/test-all", response_model=ProxyTestAllResponse)
+@router.post(
+    "/test-all",
+    response_model=ProxyTestAllResponse,
+    responses={400: {"model": ErrorResponse, "description": "Xray is not running"}},
+    operation_id="testAllProxies"
+)
 async def test_all_proxies(timeout: int = 5, workers: int = 20):
     """Test all active proxies."""
     service = get_proxy_service()
@@ -122,7 +141,15 @@ async def test_all_proxies(timeout: int = 5, workers: int = 20):
         )
 
 
-@router.post("/{port}/test", response_model=NodeTestResult)
+@router.post(
+    "/{port}/test",
+    response_model=NodeTestResult,
+    responses={
+        400: {"model": ErrorResponse, "description": "Xray is not running"},
+        404: {"model": ErrorResponse, "description": "Proxy not found"}
+    },
+    operation_id="testSingleProxy"
+)
 async def test_single_proxy(port: int, timeout: int = 5):
     """Test a single proxy."""
     service = get_proxy_service()

@@ -1,6 +1,6 @@
 # **Xray-Prism Context Map**
 
-Last Updated: 2026-01-02
+Last Updated: 2026-03-07
 
 ## **1. Project Overview (项目简介)**
 
@@ -17,6 +17,7 @@ Xray-Prism 是一个 Python 编写的高性能并发代理管理工具，能够�
 
 * **[System Architecture](../tech/architecture.md)**: 包含架构拓扑图、数据流向和核心数据结构。
 * **[API Specifications](../tech/api_specs.md)**: 标准化 API 接口定义 (Lease, Health, Proxy, Subscription)。
+* **[Python SDK](../../sdk/python/README.md)**: 基于 `openapi.json` 生成的 Python 客户端使用说明。
 * **[Fetcher Design](../tech/designs/fetcher_design.md)**: 订阅获取模块设计。
 * **[Health Monitor Design](../tech/designs/health_monitor_design.md)**: 健康监测系统实现细节。
 

@@ -3,7 +3,7 @@ Proxy management service.
 Handles active proxies and Xray process management.
 """
 import json
-from datetime import datetime
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional
 import sys
@@ -20,6 +20,25 @@ from src.xray_prism.tester import ProxyTester
 
 from api.services.subscription_service import get_subscription_service
 
+logger = logging.getLogger(__name__)
+
+PROXY_BIND_HOST = "127.0.0.1"
+DEFAULT_PROXY_SCHEME = "http"
+SUPPORTED_PROXY_PROTOCOLS = ("http", "socks5")
+
+
+def build_proxy_access_fields(port: int) -> Dict[str, object]:
+    """Build explicit client-facing access metadata for a local proxy port."""
+    proxy_address = f"{PROXY_BIND_HOST}:{port}"
+    return {
+        "proxy_address": proxy_address,
+        "proxy_scheme": DEFAULT_PROXY_SCHEME,
+        "supported_proxy_protocols": list(SUPPORTED_PROXY_PROTOCOLS),
+        "http_proxy_url": f"http://{proxy_address}",
+        "socks5_proxy_url": f"socks5://{proxy_address}",
+        "socks5h_proxy_url": f"socks5h://{proxy_address}",
+    }
+
 # Import health service (delayed to avoid circular import)
 def get_health_service():
     from api.services.health_service import get_health_service as _get_health
@@ -32,6 +51,11 @@ class ProxyService:
     DATA_DIR = PROJECT_ROOT / "data"
     PROXIES_FILE = DATA_DIR / "active_proxies.json"
     CONFIG_FILE = PROJECT_ROOT / "config.json"
+
+    @staticmethod
+    def build_proxy_access_fields(port: int) -> Dict[str, object]:
+        """Expose client-facing proxy metadata for a local port."""
+        return build_proxy_access_fields(port)
     
     def __init__(self):
         """Initialize the proxy service."""
@@ -61,6 +85,31 @@ class ProxyService:
             self._data = data
         with open(self.PROXIES_FILE, 'w', encoding='utf-8') as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
+
+    def _get_runtime_proxy_ports(self) -> List[int]:
+        """Return ports that are actually routable by the current Xray process."""
+        if self._runner and self._runner.is_running():
+            return [p["port"] for p in self._data.get("proxies", [])]
+        return []
+
+    def _sync_health_runtime_state(self, ensure_monitoring: bool = False) -> None:
+        """
+        Keep health state aligned with currently routable proxy ports.
+
+        When Xray is stopped, health states are cleared so LeaseManager cannot
+        hand out stale ports from the persisted health cache.
+        """
+        health_service = get_health_service()
+        active_ports = self._get_runtime_proxy_ports()
+        health_service.sync_with_proxies(active_ports)
+
+        if active_ports:
+            if ensure_monitoring:
+                health_service.start_monitoring(
+                    lambda: self._get_runtime_proxy_ports()
+                )
+        else:
+            health_service.stop_monitoring()
     
     def get_all_proxies(self) -> List[Dict]:
         """Get all active proxies."""
@@ -125,7 +174,9 @@ class ProxyService:
         # Regenerate config if Xray is running
         if self._runner and self._runner.is_running():
             self._regenerate_and_restart()
-        
+        else:
+            self._sync_health_runtime_state()
+
         return new_proxies
     
     def remove_proxy(self, port: int) -> bool:
@@ -144,6 +195,8 @@ class ProxyService:
             # Regenerate config if Xray is running
             if self._runner and self._runner.is_running():
                 self._regenerate_and_restart()
+            else:
+                self._sync_health_runtime_state()
             
             return True
         return False
@@ -157,7 +210,9 @@ class ProxyService:
         
         # Stop Xray if running
         if self._runner and self._runner.is_running():
-            self._runner.stop()
+            self.stop_xray()
+        else:
+            self._sync_health_runtime_state()
         
         return count
     
@@ -211,7 +266,7 @@ class ProxyService:
             if local_port:
                 port_mappings.append(PortMapping(local_port=local_port, node=node))
         
-        generator = ConfigGenerator(inbound_protocol="http")
+        generator = ConfigGenerator(inbound_protocol="socks")
         # Use port_mappings for generation
         generator.generate_and_save_with_mappings(port_mappings, str(self.CONFIG_FILE))
         
@@ -224,6 +279,7 @@ class ProxyService:
             self._runner.stop()
             time.sleep(0.5)
             self._runner.start(config_path)
+            self._sync_health_runtime_state(ensure_monitoring=True)
     
     def start_xray(self) -> Dict:
         """Start the Xray process."""
@@ -233,6 +289,7 @@ class ProxyService:
         # Check if there are any proxies
         self._load_data()
         if not self._data.get("proxies"):
+            self._sync_health_runtime_state()
             return {"success": False, "message": "No proxies configured", "status": "stopped"}
         
         # Generate config
@@ -257,23 +314,24 @@ class ProxyService:
             
             # Start health monitoring
             try:
-                health_service = get_health_service()
-                active_ports = [p["port"] for p in self._data.get("proxies", [])]
-                health_service.sync_with_proxies(active_ports)
-                health_service.start_monitoring(
-                    lambda: [p["port"] for p in self.get_all_proxies()]
-                )
+                self._sync_health_runtime_state(ensure_monitoring=True)
             except Exception as e:
                 # Log but don't fail if health monitoring fails
-                print(f"Warning: Failed to start health monitoring: {e}")
+                logger.warning("Failed to start health monitoring: %s", e)
             
             return {"success": True, "message": "Xray started successfully", "status": "running"}
         except Exception as e:
+            self._sync_health_runtime_state()
             return {"success": False, "message": f"Failed to start Xray: {e}", "status": "error"}
     
     def stop_xray(self) -> Dict:
         """Stop the Xray process."""
         if not self._runner or not self._runner.is_running():
+            self._start_time = None
+            try:
+                self._sync_health_runtime_state()
+            except Exception as e:
+                logger.warning("Failed to clear health state while Xray already stopped: %s", e)
             return {"success": True, "message": "Xray is not running", "status": "stopped"}
         
         try:
@@ -282,10 +340,9 @@ class ProxyService:
             
             # Stop health monitoring
             try:
-                health_service = get_health_service()
-                health_service.stop_monitoring()
+                self._sync_health_runtime_state()
             except Exception as e:
-                print(f"Warning: Failed to stop health monitoring: {e}")
+                logger.warning("Failed to stop health monitoring: %s", e)
             
             return {"success": True, "message": "Xray stopped successfully", "status": "stopped"}
         except Exception as e:

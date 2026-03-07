@@ -3,13 +3,21 @@ Pydantic models for Lease API request/response schemas.
 """
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ==================== Request Schemas ====================
 
 class LeaseAcquireRequest(BaseModel):
     """Request model for acquiring a proxy lease."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "workspace_id": "amazon_crawler",
+                "ttl": 60
+            }
+        }
+    )
     workspace_id: str = Field(
         ..., 
         min_length=1, 
@@ -26,6 +34,15 @@ class LeaseAcquireRequest(BaseModel):
 
 class LeaseReleaseRequest(BaseModel):
     """Request model for releasing a proxy lease."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "workspace_id": "amazon_crawler",
+                "proxy_address": "127.0.0.1:10001",
+                "cooldown_seconds": 300
+            }
+        }
+    )
     workspace_id: str = Field(
         ..., 
         min_length=1, 
@@ -48,14 +65,42 @@ class LeaseReleaseRequest(BaseModel):
 
 class LeaseAcquireResponse(BaseModel):
     """Response model for successful lease acquisition."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "lease_id": "550e8400-e29b-41d4-a716-446655440000",
+                "proxy_address": "127.0.0.1:10001",
+                "proxy_scheme": "http",
+                "supported_proxy_protocols": ["http", "socks5"],
+                "http_proxy_url": "http://127.0.0.1:10001",
+                "socks5_proxy_url": "socks5://127.0.0.1:10001",
+                "socks5h_proxy_url": "socks5h://127.0.0.1:10001",
+                "expires_at": "2026-03-07T03:10:00"
+            }
+        }
+    )
     success: bool = True
     lease_id: str = Field(..., description="Unique lease identifier")
     proxy_address: str = Field(..., description="Proxy address (e.g., '127.0.0.1:10001')")
+    proxy_scheme: str = Field(..., description="Default proxy URL scheme for backward-compatible clients")
+    supported_proxy_protocols: List[str] = Field(..., description="Client protocols supported by the same local port")
+    http_proxy_url: str = Field(..., description="HTTP proxy URL for the leased local port")
+    socks5_proxy_url: str = Field(..., description="SOCKS5 proxy URL for the leased local port")
+    socks5h_proxy_url: str = Field(..., description="SOCKS5H proxy URL for the leased local port (remote DNS)")
     expires_at: datetime = Field(..., description="Lease expiration time")
 
 
 class LeaseReleaseResponse(BaseModel):
     """Response model for lease release."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "cooldown_until": "2026-03-07T03:15:00"
+            }
+        }
+    )
     success: bool = True
     cooldown_until: Optional[datetime] = Field(
         None, 
@@ -65,6 +110,15 @@ class LeaseReleaseResponse(BaseModel):
 
 class LeaseErrorResponse(BaseModel):
     """Response model for lease errors."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": False,
+                "error": "no_available_proxy",
+                "message": "所有代理均被占用或冷却中"
+            }
+        }
+    )
     success: bool = False
     error: str = Field(..., description="Error code")
     message: str = Field(..., description="Human-readable error message")
@@ -78,6 +132,11 @@ class ActiveLeaseInfo(BaseModel):
     workspace_id: str
     proxy_port: int
     proxy_address: str
+    proxy_scheme: str
+    supported_proxy_protocols: List[str]
+    http_proxy_url: str
+    socks5_proxy_url: str
+    socks5h_proxy_url: str
     acquired_at: datetime
     expires_at: datetime
 

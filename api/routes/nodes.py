@@ -5,15 +5,19 @@ from fastapi import APIRouter, HTTPException, status
 
 from api.schemas.models import (
     NodeResponse,
-    NodeTestResult,
-    SuccessResponse
+    ErrorResponse,
 )
 from api.services.subscription_service import get_subscription_service
 
 router = APIRouter(prefix="/api/nodes", tags=["Nodes"])
 
 
-@router.get("/{node_id}", response_model=NodeResponse)
+@router.get(
+    "/{node_id}",
+    response_model=NodeResponse,
+    responses={404: {"model": ErrorResponse, "description": "Node not found"}},
+    operation_id="getNode"
+)
 async def get_node(node_id: str):
     """Get a single node by ID."""
     service = get_subscription_service()

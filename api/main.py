@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from api.routes import subscriptions, proxies, system, nodes, health, lease
 
@@ -21,8 +21,17 @@ app = FastAPI(
     title="Xray-Prism API",
     description="REST API for managing VPN subscriptions and proxy ports",
     version="0.2.0",
+    summary="Client-facing REST API for subscriptions, proxies, health monitoring, lease allocation, and Xray lifecycle control.",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "Subscriptions", "description": "Manage subscription sources and parsed nodes."},
+        {"name": "Nodes", "description": "Inspect individual proxy nodes parsed from subscriptions."},
+        {"name": "Proxies", "description": "Manage local proxy port mappings and runtime tests."},
+        {"name": "Health", "description": "Inspect and control background health monitoring."},
+        {"name": "Lease", "description": "Acquire and release proxy leases for client workloads."},
+        {"name": "System", "description": "Control Xray lifecycle and query runtime status."},
+    ]
 )
 
 # Configure CORS
@@ -58,6 +67,15 @@ async def serve_index():
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"message": "Welcome to Xray-Prism API", "docs": "/docs"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def serve_favicon():
+    """Avoid frontend console noise when no favicon asset is provided."""
+    favicon_path = WEB_DIR / "assets" / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(str(favicon_path))
+    return Response(status_code=204)
 
 
 @app.get("/health")

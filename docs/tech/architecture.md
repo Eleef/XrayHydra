@@ -1,6 +1,6 @@
 # **Xray-Prism Technical Architecture**
 
-Last Updated: 2026-01-02
+Last Updated: 2026-03-07
 
 ## **1. Overview (概述)**
 
@@ -47,8 +47,9 @@ graph TD
 2.  **Proxy Activation Flow**:
     *   Client -> API: 选择节点并激活
     *   Generator: 为每个节点分配本地端口 (Base Port + Index)
-    *   Generator: 生成 Xray JSON 配置 (Inbound <-> Routing <-> Outbound)
+    *   Generator: 生成 Xray JSON 配置 (Socks Inbound <-> Routing <-> Outbound)
     *   Runner: 重启 Xray 进程加载新配置
+    *   HealthService: 仅同步当前正在运行的代理端口，移除已删除或未启动的端口健康状态
 
 3.  **Health Monitoring Flow**:
     *   Monitor (Background Thread): 周期性轮询
@@ -57,11 +58,31 @@ graph TD
 
 4.  **Lease Acquisition Flow**:
     *   Client -> API: `POST /lease/acquire`
-    *   LeaseManager: 筛选 `Healthy` 节点
+    *   LeaseManager: 筛选当前 `Healthy/Degraded` 且仍由活跃 Xray 进程承载的端口
     *   LeaseManager: LRU 算法选择最久未使用节点
     *   LeaseManager: 创建 Lease 记录 (In-Memory)
+    *   API: 返回同一端口的 `http_proxy_url` / `socks5_proxy_url`，避免调用方误判协议
 
-## **4. Data Structures (关键数据)**
+## **4. Runtime Safety Rules (运行时安全规则)**
+
+1. **Project-scoped Process Control**:
+   * Runner 只停止当前项目自己启动并记录过的 Xray 进程。
+   * Windows / Linux 都避免使用全局 `taskkill` / `pkill` 策略，以免误伤同机其他实例。
+
+2. **Atomic Subscription Persistence**:
+   * 创建订阅时先抓取和解析，再落盘订阅与节点数据。
+   * 刷新订阅时仅在新节点准备完成后才替换旧节点，避免数据被半途清空。
+
+3. **Health State Consistency**:
+   * 健康状态与实际运行中的代理端口保持一致。
+   * Xray 停止后会清空可分配健康端口，防止 LeaseManager 继续发放失效地址。
+
+4. **Single-port Mixed Proxy Access**:
+   * 当前每个本地代理端口由 Xray `socks` inbound 提供。
+   * 同一 `127.0.0.1:<port>` 同时兼容 HTTP 和 SOCKS5 客户端。
+   * API 会显式返回 `http_proxy_url` 与 `socks5_proxy_url`，而不是要求客户端自己猜测协议。
+
+## **5. Data Structures (关键数据)**
 
 ### **ProxyNode**
 ```python
