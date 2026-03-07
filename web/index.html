@@ -110,6 +110,19 @@
 
             <!-- Column 3: Proxies/Leases Panel -->
             <div class="panel proxies-panel">
+                <div class="workspace-bar">
+                    <div class="workspace-bar-header">
+                        <div>
+                            <p class="workspace-bar-label">当前 Workspace</p>
+                            <h3 class="workspace-bar-title" id="current-workspace-name">未选择</h3>
+                        </div>
+                        <span class="workspace-bar-hint" id="workspace-bar-hint">仅显示已有租约或冷却记录的 workspace</span>
+                    </div>
+                    <div class="workspace-chip-list" id="workspace-chip-list">
+                        <div class="workspace-empty" id="workspace-empty-state">暂无可选 workspace</div>
+                    </div>
+                </div>
+
                 <!-- Tab Header -->
                 <div class="panel-tabs">
                     <button class="tab-btn active" data-tab="proxies">
@@ -190,6 +203,7 @@
                                     <polyline points="12 6 12 12 16 14"></polyline>
                                 </svg>
                                 活跃租约
+                                <span class="section-caption" id="active-lease-caption">当前 workspace</span>
                             </h3>
                             <button class="btn btn-sm" id="btn-refresh-leases" title="刷新">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -213,6 +227,7 @@
                                     <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
                                 </svg>
                                 冷却池
+                                <span class="section-caption" id="cooldown-caption">当前 workspace</span>
                             </h3>
                         </div>
                         <div id="cooldown-list" class="lease-list">

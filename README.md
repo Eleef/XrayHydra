@@ -14,10 +14,12 @@
   - **Workspace 隔离**: 不同业务域可同时使用同一代理，互不干扰。
   - **TTL 机制**: 租约自动过期，防止调用方崩溃导致资源僵死。
   - **客户端冷却**: 支持自定义回收后的冷却时间，精细控制使用频率。
+  - **手动冷却 / 召回**: Web UI 和 OpenAPI 均支持按 workspace 手动冷却代理，并在需要时召回。
   - **LRU 负载均衡**: 智能分配最久未使用的代理端口。
 - 🔀 **Mixed-Port 本地代理**: 每个本地端口由 Xray `socks` inbound 提供，客户端可对同一端口使用 `http://` 或 `socks5://`。
 - 🪟🐧 **跨平台进程管理**: Windows / Linux 下都只回收本项目启动的 Xray 进程，不会全局误杀同机其他实例。
-- 🎨 **现代化 UI**: 简约明亮的浅色三栏式布局，状态一目了然。
+- 1️⃣ **Web 服务端口冲突检测**: 启动前会检查目标 `host:port` 是否可绑定，避免重复占用同一端口时才在运行阶段报错。
+- 🎨 **现代化 UI**: 简约明亮的浅色三栏式布局，代理栏更宽，并支持 workspace 视角下的租约与冷却管理。
 - ⚙️ **环境隔离**: 支持 `.env` 配置，支持 Bearer Token API 认证。
 
 ## 🚀 快速开始
@@ -79,18 +81,22 @@ python server.py
 .venv\Scripts\python.exe tests/test_lease_client.py
 ```
 
-### 5. Python SDK
+### 5. Python / TypeScript SDK
 
-项目已基于 `openapi.json` 生成一份 Python SDK，目录位于 `sdk/python`。
+项目已基于 `openapi.json` 生成 Python / TypeScript SDK，目录分别位于 `sdk/python` 与 `sdk/typescript`。
 
 它的主要用途：
 - 让 Python 调用方直接用类型化方法访问 API，而不是手写 `requests/httpx` 和 URL。
 - 把服务端 OpenAPI 契约复用到客户端，减少字段名、鉴权头、请求结构漂移。
+- 让前端工具、Node.js 脚本或其他 TypeScript 客户端也能直接复用同一份契约。
 - 后续接口变更时，可以通过重新生成 SDK 同步给爬虫、调度器或外部业务系统。
 
 ```bash
 # 重新生成 SDK
 .venv\Scripts\python.exe scripts/generate_python_sdk.py
+
+# 重新生成 TypeScript SDK
+.venv\Scripts\python.exe scripts/generate_typescript_sdk.py
 
 # 如需额外导出 OpenAPI 文件（默认不落盘，避免大 JSON 进入仓库）
 .venv\Scripts\python.exe scripts/generate_python_sdk.py --write-openapi .\tmp\openapi.json
@@ -99,7 +105,7 @@ python server.py
 .venv\Scripts\python.exe -m pip install -e .\sdk\python
 ```
 
-更多使用说明见 `sdk/python/README.md`。
+更多使用说明见 `sdk/python/README.md` 和 `sdk/typescript/README.md`。
 
 ## 📌 行为说明
 
@@ -107,7 +113,10 @@ python server.py
 - 代理健康状态只反映当前 Xray 实际可路由的端口；Xray 停止后会清空对应健康状态，避免租约系统分配失效端口。
 - 客户端接口基于 FastAPI 生成标准 OpenAPI，包含稳定 `operationId`、请求示例和 Lease API 的标准 Bearer 安全方案声明。
 - Python 客户端 SDK 已由 OpenAPI 契约生成，适合内部自动化脚本、测试工具和外部业务接入。
+- TypeScript SDK 已由同一份 OpenAPI 契约生成，适合浏览器端控制台、Node.js 自动化和其他 TS 客户端接入。
 - 本地代理端口采用 Xray `socks` inbound，以单端口 mixed-port 方式同时兼容 HTTP 和 SOCKS5 客户端；新客户端应优先使用接口返回的 `http_proxy_url` / `socks5_proxy_url`，不要只拿 `host:port` 自行猜协议。
+- Web 前端右侧代理栏现在基于当前 workspace 展示租约与冷却状态，并支持对可用代理手动冷却、对冷却代理手动召回。
+- `server.py` 现在会在启动前先检查目标端口是否已被占用；如果冲突，会直接提示当前地址不可用，并建议换端口或先停止占用进程。
 
 ## 🔌 代理租约 API 使用示例
 

@@ -85,7 +85,7 @@ const Components = {
      * @param {object} proxy - Proxy data
      * @returns {HTMLElement}
      */
-    proxyItem(proxy) {
+    proxyItem(proxy, workspaceState = null) {
         const div = document.createElement('div');
         div.className = 'proxy-item';
         div.dataset.port = proxy.port;
@@ -93,38 +93,66 @@ const Components = {
         const latencyClass = this.getLatencyClass(proxy.latency_ms);
         const latencyText = proxy.latency_ms ? `${proxy.latency_ms}ms` : '--';
         const ipText = proxy.exit_ip || '--';
+        const state = workspaceState || {
+            stateClass: 'unscoped',
+            stateLabel: '未选择 workspace',
+            sourceLabel: '',
+            note: '请选择一个已有 workspace 后再做手动管理。',
+            canCooldown: false,
+            canRecall: false,
+        };
 
         div.innerHTML = `
-            <div class="proxy-port">
-                <span>:</span>${proxy.port}
-            </div>
-            <div class="proxy-info">
-                <span class="proxy-name">${this.escapeHtml(proxy.node_name)}</span>
-                <div class="proxy-meta">
-                    <span class="node-protocol">${proxy.protocol}</span>
-                    ${proxy.exit_ip ? `<span class="proxy-ip">${ipText}</span>` : ''}
-                    ${proxy.latency_ms ? `<span class="proxy-latency ${latencyClass}">${latencyText}</span>` : ''}
+            <div class="proxy-item-main">
+                <div class="proxy-port">
+                    <span>:</span>${proxy.port}
+                </div>
+                <div class="proxy-info">
+                    <span class="proxy-name">${this.escapeHtml(proxy.node_name)}</span>
+                    <div class="proxy-meta">
+                        <span class="node-protocol">${proxy.protocol}</span>
+                        ${proxy.exit_ip ? `<span class="proxy-ip">${ipText}</span>` : ''}
+                        ${proxy.latency_ms ? `<span class="proxy-latency ${latencyClass}">${latencyText}</span>` : ''}
+                    </div>
+                    <span class="proxy-workspace-note">${this.escapeHtml(state.note || '')}</span>
                 </div>
             </div>
-            <div class="proxy-actions">
-                <button class="btn btn-icon btn-sm" data-action="copy" title="复制代理地址">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                </button>
-                <button class="btn btn-icon btn-sm" data-action="test" title="测试">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                    </svg>
-                </button>
-                <button class="btn btn-icon btn-sm" data-action="remove" title="移除">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
+            <div class="proxy-item-side">
+                <span class="proxy-state ${state.stateClass}">
+                    <span>${this.escapeHtml(state.stateLabel)}</span>
+                    ${state.sourceLabel ? `<span class="proxy-state-source">${this.escapeHtml(state.sourceLabel)}</span>` : ''}
+                </span>
+                <div class="proxy-actions">
+                    <button class="btn btn-icon btn-sm" data-action="copy" title="复制代理地址">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+                    <button class="btn btn-icon btn-sm" data-action="test" title="测试">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </button>
+                    <button class="btn btn-icon btn-sm" data-action="cooldown" title="手动冷却" ${state.canCooldown ? '' : 'disabled'}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                        </svg>
+                    </button>
+                    <button class="btn btn-icon btn-sm" data-action="recall" title="召回冷却" ${state.canRecall ? '' : 'disabled'}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                            <polyline points="21 3 21 9 15 9"></polyline>
+                        </svg>
+                    </button>
+                    <button class="btn btn-icon btn-sm" data-action="remove" title="移除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
             </div>
         `;
 

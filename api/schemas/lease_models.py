@@ -2,7 +2,7 @@
 Pydantic models for Lease API request/response schemas.
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -61,6 +61,30 @@ class LeaseReleaseRequest(BaseModel):
     )
 
 
+class LeaseCooldownRequest(BaseModel):
+    """Request model for manual cooldown/recall operations."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "workspace_id": "amazon_crawler",
+                "proxy_port": 10001,
+            }
+        }
+    )
+    workspace_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Workspace identifier"
+    )
+    proxy_port: int = Field(
+        ...,
+        ge=1,
+        le=65535,
+        description="Local proxy port"
+    )
+
+
 # ==================== Response Schemas ====================
 
 class LeaseAcquireResponse(BaseModel):
@@ -103,8 +127,29 @@ class LeaseReleaseResponse(BaseModel):
     )
     success: bool = True
     cooldown_until: Optional[datetime] = Field(
-        None, 
+        None,
         description="Cooldown end time (null if no cooldown)"
+    )
+
+
+class LeaseCooldownActionResponse(BaseModel):
+    """Response model for manual cooldown and recall actions."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "workspace_id": "amazon_crawler",
+                "proxy_port": 10001,
+                "source": "manual"
+            }
+        }
+    )
+    success: bool = True
+    workspace_id: str
+    proxy_port: int
+    source: Optional[Literal["manual", "timed"]] = Field(
+        default=None,
+        description="Cooldown source that was created or recalled"
     )
 
 
@@ -145,8 +190,17 @@ class CooldownInfo(BaseModel):
     """Information about a cooldown."""
     workspace_id: str
     proxy_port: int
-    until: datetime
+    until: Optional[datetime]
     set_at: datetime
+    source: Literal["manual", "timed"]
+
+
+class WorkspaceLeaseSummary(BaseModel):
+    """Aggregated lease/cooldown counts for one workspace."""
+    workspace_id: str
+    active_count: int
+    cooldown_count: int
+    last_activity_at: datetime
 
 
 class LeaseStatusResponse(BaseModel):
@@ -156,6 +210,7 @@ class LeaseStatusResponse(BaseModel):
     cooldowns: List[CooldownInfo]
     total_active: int
     total_cooldowns: int
+    workspaces: List[WorkspaceLeaseSummary]
 
 
 class LeaseStatsResponse(BaseModel):

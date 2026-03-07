@@ -41,6 +41,8 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("acquireLease", operation_ids)
         self.assertIn("createSubscription", operation_ids)
         self.assertIn("getSystemStatus", operation_ids)
+        self.assertIn("setManualLeaseCooldown", operation_ids)
+        self.assertIn("recallLeaseCooldown", operation_ids)
 
     def test_openapi_includes_request_examples(self):
         """Request schemas should carry examples for API consumers."""
@@ -74,6 +76,17 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("socks5_proxy_url", lease_props)
         self.assertIn("socks5h_proxy_url", lease_props)
         self.assertIn("supported_proxy_protocols", lease_props)
+
+        release_props = schemas["LeaseReleaseResponse"]["properties"]
+        self.assertIn("success", release_props)
+        self.assertIn("cooldown_until", release_props)
+
+        cooldown_props = schemas["CooldownInfo"]["properties"]
+        self.assertIn("source", cooldown_props)
+        self.assertIn("until", cooldown_props)
+
+        lease_status_props = schemas["LeaseStatusResponse"]["properties"]
+        self.assertIn("workspaces", lease_status_props)
 
 
 if __name__ == "__main__":

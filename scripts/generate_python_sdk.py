@@ -73,10 +73,22 @@ def python_type(schema: dict[str, Any]) -> str:
 
 def typed_dict_body(spec: dict[str, Any]) -> str:
     components = spec.get("components", {}).get("schemas", {})
-    request_names = sorted(
+    request_names = {
         name for name in components
         if name.endswith("Request") or name.endswith("Update")
-    )
+    }
+
+    for path_item in spec.get("paths", {}).values():
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            request_body = operation.get("requestBody", {})
+            schema = request_body.get("content", {}).get("application/json", {}).get("schema")
+            schema_name = schema_ref_name(schema)
+            if schema_name:
+                request_names.add(schema_name)
+
+    request_names = sorted(request_names)
     lines: list[str] = [
         '"""Typed request payloads generated from the OpenAPI schema."""',
         "",
@@ -472,6 +484,29 @@ with XrayPrismClient(base_url="http://127.0.0.1:8000") as client:
     print(config)
 ```
 
+### 6. 手动冷却与召回代理
+
+```python
+from xray_prism_sdk import XrayPrismClient
+
+with XrayPrismClient(
+    base_url="http://127.0.0.1:8000",
+    token="YOUR_TOKEN",
+) as client:
+    client.set_manual_lease_cooldown({{
+        "workspace_id": "crawler",
+        "proxy_port": 10022,
+    }})
+
+    status = client.get_lease_status()
+    print(status["workspaces"])
+
+    client.recall_lease_cooldown({{
+        "workspace_id": "crawler",
+        "proxy_port": 10022,
+    }})
+```
+
 ## 请求模型
 
 SDK 在 `xray_prism_sdk.models` 中生成了请求 `TypedDict`，适合在 IDE 和类型检查器中使用：
@@ -492,9 +527,11 @@ with XrayPrismClient(base_url="http://127.0.0.1:8000", token="YOUR_TOKEN") as cl
 当前已生成的请求模型：
 
 - `models.HealthConfigUpdate`
+- `models.LeaseCooldownRequest`
 - `models.LeaseAcquireRequest`
 - `models.LeaseReleaseRequest`
 - `models.ProxyAddRequest`
+- `models.SubscriptionCreate`
 
 ## 返回值与错误处理
 

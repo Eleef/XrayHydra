@@ -321,6 +321,32 @@ class ApiClient {
     }
 
     /**
+     * Create a manual cooldown for a workspace and proxy port
+     * @param {string} workspaceId - Workspace identifier
+     * @param {number} proxyPort - Proxy port
+     * @returns {Promise<{success: boolean, workspace_id: string, proxy_port: number, source: string|null}>}
+     */
+    async setManualLeaseCooldown(workspaceId, proxyPort) {
+        return this.request('/lease/cooldown/manual', {
+            method: 'POST',
+            body: JSON.stringify({ workspace_id: workspaceId, proxy_port: proxyPort }),
+        });
+    }
+
+    /**
+     * Recall a cooldown for a workspace and proxy port
+     * @param {string} workspaceId - Workspace identifier
+     * @param {number} proxyPort - Proxy port
+     * @returns {Promise<{success: boolean, workspace_id: string, proxy_port: number, source: string|null}>}
+     */
+    async recallLeaseCooldown(workspaceId, proxyPort) {
+        return this.request('/lease/cooldown/recall', {
+            method: 'POST',
+            body: JSON.stringify({ workspace_id: workspaceId, proxy_port: proxyPort }),
+        });
+    }
+
+    /**
      * Acquire a proxy lease
      * @param {string} workspaceId - Workspace identifier
      * @param {number} ttl - Time to live in seconds

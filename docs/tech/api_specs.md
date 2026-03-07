@@ -50,6 +50,58 @@ Last Updated: 2026-03-07
     }
     ```
 
+### **Manual Cooldown**
+*   **Endpoint**: `POST /cooldown/manual`
+*   **OperationId**: `setManualLeaseCooldown`
+*   **Summary**: 为指定 `workspace + proxy_port` 建立手动冷却。
+*   **Request**:
+    ```json
+    {
+      "workspace_id": "string",
+      "proxy_port": 10000
+    }
+    ```
+*   **Behavior**: `manual` 冷却不自动过期，只能通过召回接口结束。
+
+### **Recall Cooldown**
+*   **Endpoint**: `POST /cooldown/recall`
+*   **OperationId**: `recallLeaseCooldown`
+*   **Summary**: 移除指定 `workspace + proxy_port` 的冷却记录。
+*   **Behavior**: 可用于结束手动冷却，或提前结束原本会自动过期的定时冷却。
+
+### **Get Status**
+*   **Endpoint**: `GET /status`
+*   **OperationId**: `getLeaseStatus`
+*   **Summary**: 获取当前租约状态和 workspace 摘要。
+*   **Response Highlights**:
+    ```json
+    {
+      "active_leases": [
+        {
+          "workspace_id": "crawler_a",
+          "proxy_port": 10022,
+          "expires_at": "timestamp"
+        }
+      ],
+      "cooldowns": [
+        {
+          "workspace_id": "crawler_a",
+          "proxy_port": 10022,
+          "source": "manual",
+          "until": null
+        }
+      ],
+      "workspaces": [
+        {
+          "workspace_id": "crawler_a",
+          "active_count": 1,
+          "cooldown_count": 1,
+          "last_activity_at": "timestamp"
+        }
+      ]
+    }
+    ```
+
 ### **Get Stats**
 *   **Endpoint**: `GET /stats`
 *   **OperationId**: `getLeaseStats`
@@ -156,14 +208,16 @@ Last Updated: 2026-03-07
 
 *   **Contract Source**: 以服务端 `/openapi.json` 为唯一契约源。
 *   **Current Output**: 仓库内已提供 `sdk/python` 目录，包含基于当前 OpenAPI 生成的 Python SDK。
-*   **Generator**: `scripts/generate_python_sdk.py`
+*   **Current Output**: 仓库内同时提供 `sdk/python` 与 `sdk/typescript`，分别用于 Python 与 TypeScript 调用方。
+*   **Generator**: `scripts/generate_python_sdk.py`、`scripts/generate_typescript_sdk.py`
 *   **Artifact Policy**: 仓库默认不提交 `sdk/python/openapi.json` 这类大体积契约副本；OpenAPI 以运行中的 `/openapi.json` 和按需导出为准。
 *   **Why**:
     *   避免调用方重复手写 URL、鉴权头和请求体结构。
     *   降低服务端接口变更后客户端漂移的风险。
-    *   便于后续继续扩展 TypeScript SDK 或其他语言 SDK。
+    *   让 Python / TypeScript 两侧统一消费同一份 Lease / Proxy / Health / System 契约。
 *   **Regeneration Flow**:
     ```bash
     .venv\Scripts\python.exe scripts/generate_python_sdk.py
+    .venv\Scripts\python.exe scripts/generate_typescript_sdk.py
     .venv\Scripts\python.exe -m pip install -e .\sdk\python
     ```

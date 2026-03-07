@@ -287,6 +287,20 @@ class XrayPrismClient:
         json_body = dict(payload)
         return self._request('POST', '/api/lease/release', params=params, json_body=json_body, requires_auth=True)
 
+    def set_manual_lease_cooldown(self, payload: models.LeaseCooldownRequest) -> Any:
+        """手动冷却代理."""
+        # 为指定 workspace 的代理端口创建一个仅手动召回结束的冷却记录。
+        params = None
+        json_body = dict(payload)
+        return self._request('POST', '/api/lease/cooldown/manual', params=params, json_body=json_body, requires_auth=True)
+
+    def recall_lease_cooldown(self, payload: models.LeaseCooldownRequest) -> Any:
+        """召回冷却代理."""
+        # 移除指定 workspace 的代理冷却记录，可用于结束手动冷却或提前结束定时冷却。
+        params = None
+        json_body = dict(payload)
+        return self._request('POST', '/api/lease/cooldown/recall', params=params, json_body=json_body, requires_auth=True)
+
     def get_lease_status(self, workspace_id: str | None = None) -> Any:
         """查看租约状态."""
         # 查看当前租约和冷却状态。

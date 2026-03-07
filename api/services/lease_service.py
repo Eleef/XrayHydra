@@ -52,18 +52,22 @@ class CooldownRecord:
     """Represents a cooldown period."""
     workspace_id: str
     proxy_port: int
-    until: datetime
+    until: Optional[datetime]
     set_at: datetime
+    source: str = "timed"
     
     def is_expired(self) -> bool:
+        if self.until is None:
+            return False
         return datetime.now() > self.until
     
     def to_dict(self) -> dict:
         return {
             "workspace_id": self.workspace_id,
             "proxy_port": self.proxy_port,
-            "until": self.until.isoformat(),
-            "set_at": self.set_at.isoformat()
+            "until": self.until.isoformat() if self.until else None,
+            "set_at": self.set_at.isoformat(),
+            "source": self.source,
         }
 
 
@@ -322,7 +326,8 @@ class LeaseManager:
                     workspace_id=workspace_id,
                     proxy_port=port,
                     until=cooldown_until,
-                    set_at=now
+                    set_at=now,
+                    source="timed",
                 )
                 logger.debug(f"Cooldown set: {key} until {cooldown_until}")
             
@@ -335,6 +340,80 @@ class LeaseManager:
             )
             
             return True, cooldown_until
+
+    def set_manual_cooldown(self, workspace_id: str, proxy_port: int) -> tuple[bool, Optional[str]]:
+        """Create or replace a manual cooldown for the given workspace and port."""
+        with self._lock:
+            self._cleanup_expired_leases()
+            self._cleanup_expired_cooldowns()
+
+            key = self._make_key(workspace_id, proxy_port)
+            if key in self._active_leases and not self._active_leases[key].is_expired():
+                return False, "workspace currently holds an active lease for this proxy"
+
+            self._cooldowns[key] = CooldownRecord(
+                workspace_id=workspace_id,
+                proxy_port=proxy_port,
+                until=None,
+                set_at=datetime.now(),
+                source="manual",
+            )
+            logger.info(f"Manual cooldown set: {workspace_id} -> port {proxy_port}")
+            return True, None
+
+    def recall_cooldown(self, workspace_id: str, proxy_port: int) -> tuple[bool, Optional[str]]:
+        """Remove an existing cooldown for the given workspace and port."""
+        with self._lock:
+            self._cleanup_expired_leases()
+            self._cleanup_expired_cooldowns()
+
+            key = self._make_key(workspace_id, proxy_port)
+            cooldown = self._cooldowns.pop(key, None)
+            source = cooldown.source if cooldown else None
+            logger.info(f"Cooldown recalled: {workspace_id} -> port {proxy_port}, source={source}")
+            return True, source
+
+    def _build_workspace_summaries(self) -> List[dict]:
+        """Summarize active and cooldown state per workspace."""
+        workspace_map: Dict[str, dict] = {}
+
+        for lease in self._active_leases.values():
+            summary = workspace_map.setdefault(
+                lease.workspace_id,
+                {
+                    "workspace_id": lease.workspace_id,
+                    "active_count": 0,
+                    "cooldown_count": 0,
+                    "last_activity_at": lease.acquired_at,
+                },
+            )
+            summary["active_count"] += 1
+            if lease.acquired_at > summary["last_activity_at"]:
+                summary["last_activity_at"] = lease.acquired_at
+
+        for cooldown in self._cooldowns.values():
+            summary = workspace_map.setdefault(
+                cooldown.workspace_id,
+                {
+                    "workspace_id": cooldown.workspace_id,
+                    "active_count": 0,
+                    "cooldown_count": 0,
+                    "last_activity_at": cooldown.set_at,
+                },
+            )
+            summary["cooldown_count"] += 1
+            if cooldown.set_at > summary["last_activity_at"]:
+                summary["last_activity_at"] = cooldown.set_at
+
+        summaries = list(workspace_map.values())
+        summaries.sort(key=lambda item: (item["last_activity_at"], item["workspace_id"]), reverse=True)
+        return [
+            {
+                **summary,
+                "last_activity_at": summary["last_activity_at"].isoformat(),
+            }
+            for summary in summaries
+        ]
     
     def get_status(self, workspace_id: Optional[str] = None) -> dict:
         """
@@ -372,7 +451,8 @@ class LeaseManager:
                 "active_leases": leases,
                 "cooldowns": cooldowns,
                 "total_active": len(leases),
-                "total_cooldowns": len(cooldowns)
+                "total_cooldowns": len(cooldowns),
+                "workspaces": self._build_workspace_summaries(),
             }
     
     def get_stats(self) -> dict:

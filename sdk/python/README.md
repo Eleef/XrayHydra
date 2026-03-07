@@ -167,6 +167,29 @@ with XrayPrismClient(base_url="http://127.0.0.1:8000") as client:
     print(config)
 ```
 
+### 6. 手动冷却与召回代理
+
+```python
+from xray_prism_sdk import XrayPrismClient
+
+with XrayPrismClient(
+    base_url="http://127.0.0.1:8000",
+    token="YOUR_TOKEN",
+) as client:
+    client.set_manual_lease_cooldown({
+        "workspace_id": "crawler",
+        "proxy_port": 10022,
+    })
+
+    status = client.get_lease_status()
+    print(status["workspaces"])
+
+    client.recall_lease_cooldown({
+        "workspace_id": "crawler",
+        "proxy_port": 10022,
+    })
+```
+
 ## 请求模型
 
 SDK 在 `xray_prism_sdk.models` 中生成了请求 `TypedDict`，适合在 IDE 和类型检查器中使用：
@@ -187,9 +210,11 @@ with XrayPrismClient(base_url="http://127.0.0.1:8000", token="YOUR_TOKEN") as cl
 当前已生成的请求模型：
 
 - `models.HealthConfigUpdate`
+- `models.LeaseCooldownRequest`
 - `models.LeaseAcquireRequest`
 - `models.LeaseReleaseRequest`
 - `models.ProxyAddRequest`
+- `models.SubscriptionCreate`
 
 ## 返回值与错误处理
 
@@ -268,6 +293,7 @@ finally:
 - `list_proxies()`
 - `list_subscription_nodes()`
 - `list_subscriptions()`
+- `recall_lease_cooldown()`
 - `refresh_subscription()`
 - `release_lease()`
 - `remove_proxy()`
@@ -275,6 +301,7 @@ finally:
 - `reset_proxy_health()`
 - `restart_xray()`
 - `run_health_check()`
+- `set_manual_lease_cooldown()`
 - `start_health_monitoring()`
 - `start_xray()`
 - `stop_health_monitoring()`

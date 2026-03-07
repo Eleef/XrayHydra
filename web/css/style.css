@@ -98,7 +98,7 @@ body {
 
 .main-content {
     display: grid;
-    grid-template-columns: var(--sidebar-width) 1fr 1fr;
+    grid-template-columns: var(--sidebar-width) minmax(0, 2fr) minmax(0, 4fr);
     flex: 1;
     gap: var(--spacing-md);
     padding: calc(var(--header-height) + var(--spacing-md)) var(--spacing-md) var(--spacing-md);
@@ -773,6 +773,170 @@ body {
     gap: var(--spacing-xs);
 }
 
+.proxy-actions .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.proxy-item {
+    align-items: flex-start;
+}
+
+.proxy-item-main {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex: 1;
+    min-width: 0;
+}
+
+.proxy-item-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.proxy-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px var(--spacing-sm);
+    border-radius: var(--radius-full);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.proxy-state.available {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.proxy-state.leased {
+    background: var(--info-bg);
+    color: var(--info);
+}
+
+.proxy-state.cooldown {
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.proxy-state.unscoped {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    border-color: var(--border-color);
+}
+
+.proxy-state-source {
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    background: rgba(255, 255, 255, 0.72);
+    font-size: 0.625rem;
+    text-transform: uppercase;
+}
+
+.proxy-workspace-note {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+}
+
+.section-caption {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--spacing-sm);
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font-size: 0.625rem;
+    font-weight: 600;
+}
+
+.workspace-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) 0 var(--spacing-md);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.workspace-bar-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.workspace-bar-label {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+}
+
+.workspace-bar-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.workspace-bar-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.workspace-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+}
+
+.workspace-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 0.75rem;
+}
+
+.workspace-chip:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.workspace-chip.active {
+    background: var(--accent-light);
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.workspace-chip-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: var(--radius-full);
+    background: rgba(255, 255, 255, 0.72);
+    font-size: 0.6875rem;
+    font-weight: 700;
+}
+
+.workspace-empty {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
 /* ==================== Modal ==================== */
 .modal-overlay {
     position: fixed;
@@ -973,7 +1137,7 @@ body {
 /* ==================== Responsive ==================== */
 @media (max-width: 1200px) {
     .main-content {
-        grid-template-columns: 240px 1fr 1fr;
+        grid-template-columns: 240px minmax(0, 1.6fr) minmax(0, 2.8fr);
     }
 
     :root {
@@ -1023,6 +1187,33 @@ body {
 
     .search-box input {
         width: 100%;
+    }
+
+    .workspace-bar-header {
+        flex-direction: column;
+    }
+
+    .workspace-bar-hint {
+        text-align: left;
+    }
+
+    .proxy-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .proxy-item-main {
+        width: 100%;
+    }
+
+    .proxy-item-side {
+        width: 100%;
+        align-items: flex-start;
+    }
+
+    .proxy-actions {
+        width: 100%;
+        flex-wrap: wrap;
     }
 }
 

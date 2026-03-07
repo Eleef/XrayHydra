@@ -42,6 +42,12 @@ class TestPythonSdk(unittest.TestCase):
         self.assertIn("total_available_proxies", data)
         self.assertIn("workspaces", data)
 
+    def test_can_call_lease_status_and_exposes_new_methods(self):
+        data = self.client.get_lease_status()
+        self.assertIn("workspaces", data)
+        self.assertTrue(hasattr(self.client, "set_manual_lease_cooldown"))
+        self.assertTrue(hasattr(self.client, "recall_lease_cooldown"))
+
 
 if __name__ == "__main__":
     unittest.main()

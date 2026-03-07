@@ -18,11 +18,14 @@ from api.schemas.lease_models import (
     LeaseAcquireResponse,
     LeaseReleaseRequest,
     LeaseReleaseResponse,
+    LeaseCooldownRequest,
+    LeaseCooldownActionResponse,
     LeaseErrorResponse,
     LeaseStatusResponse,
     LeaseStatsResponse,
     ActiveLeaseInfo,
     CooldownInfo,
+    WorkspaceLeaseSummary,
 )
 from api.services.lease_service import get_lease_manager
 from api.schemas.models import ErrorResponse
@@ -161,6 +164,67 @@ async def release_lease(request: LeaseReleaseRequest):
     )
 
 
+@router.post(
+    "/cooldown/manual",
+    response_model=LeaseCooldownActionResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid cooldown request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        409: {"model": ErrorResponse, "description": "Proxy is actively leased by the workspace"},
+    },
+    operation_id="setManualLeaseCooldown",
+    summary="手动冷却代理",
+    description="为指定 workspace 的代理端口创建一个仅手动召回结束的冷却记录。"
+)
+async def set_manual_lease_cooldown(request: LeaseCooldownRequest):
+    """Create a manual cooldown for a workspace and proxy port."""
+    manager = get_lease_manager()
+    success, error = manager.set_manual_cooldown(
+        workspace_id=request.workspace_id,
+        proxy_port=request.proxy_port,
+    )
+
+    if not success:
+        raise HTTPException(status_code=409, detail=error or "Unable to set manual cooldown")
+
+    return LeaseCooldownActionResponse(
+        success=True,
+        workspace_id=request.workspace_id,
+        proxy_port=request.proxy_port,
+        source="manual",
+    )
+
+
+@router.post(
+    "/cooldown/recall",
+    response_model=LeaseCooldownActionResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid recall request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+    },
+    operation_id="recallLeaseCooldown",
+    summary="召回冷却代理",
+    description="移除指定 workspace 的代理冷却记录，可用于结束手动冷却或提前结束定时冷却。"
+)
+async def recall_lease_cooldown(request: LeaseCooldownRequest):
+    """Recall an existing cooldown for a workspace and proxy port."""
+    manager = get_lease_manager()
+    success, source = manager.recall_cooldown(
+        workspace_id=request.workspace_id,
+        proxy_port=request.proxy_port,
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Unable to recall cooldown")
+
+    return LeaseCooldownActionResponse(
+        success=True,
+        workspace_id=request.workspace_id,
+        proxy_port=request.proxy_port,
+        source=source,
+    )
+
+
 @router.get(
     "/status",
     response_model=LeaseStatusResponse,
@@ -203,9 +267,20 @@ async def get_lease_status(
             workspace_id=cd["workspace_id"],
             proxy_port=cd["proxy_port"],
             until=cd["until"],
-            set_at=cd["set_at"]
+            set_at=cd["set_at"],
+            source=cd["source"],
         )
         for cd in status["cooldowns"]
+    ]
+
+    workspaces = [
+        WorkspaceLeaseSummary(
+            workspace_id=workspace["workspace_id"],
+            active_count=workspace["active_count"],
+            cooldown_count=workspace["cooldown_count"],
+            last_activity_at=workspace["last_activity_at"],
+        )
+        for workspace in status["workspaces"]
     ]
     
     return LeaseStatusResponse(
@@ -213,7 +288,8 @@ async def get_lease_status(
         active_leases=active_leases,
         cooldowns=cooldowns,
         total_active=status["total_active"],
-        total_cooldowns=status["total_cooldowns"]
+        total_cooldowns=status["total_cooldowns"],
+        workspaces=workspaces,
     )
 
 

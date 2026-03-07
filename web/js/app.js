@@ -16,6 +16,14 @@ class App {
         this.healthConfig = null;
         this.currentTab = 'proxies';  // 'proxies' or 'leases'
         this.leaseRefreshInterval = null;
+        this.leaseStatus = {
+            active_leases: [],
+            cooldowns: [],
+            workspaces: [],
+            total_active: 0,
+            total_cooldowns: 0,
+        };
+        this.currentWorkspaceId = localStorage.getItem('xray-prism.currentWorkspaceId') || null;
 
         // DOM Elements
         this.elements = {
@@ -32,6 +40,9 @@ class App {
             proxiesCount: document.getElementById('proxies-count'),
             btnTestAll: document.getElementById('btn-test-all'),
             btnClearProxies: document.getElementById('btn-clear-proxies'),
+            workspaceChipList: document.getElementById('workspace-chip-list'),
+            currentWorkspaceName: document.getElementById('current-workspace-name'),
+            workspaceBarHint: document.getElementById('workspace-bar-hint'),
             modalAddSubscription: document.getElementById('modal-add-subscription'),
             subName: document.getElementById('sub-name'),
             subUrl: document.getElementById('sub-url'),
@@ -50,6 +61,9 @@ class App {
 
         // Auto-refresh status every 5 seconds
         setInterval(() => this.updateSystemStatus(), 5000);
+
+        // Keep workspace/lease state fresh for both proxy and lease tabs
+        setInterval(() => this.refreshLeaseData(), 5000);
 
         // Auto-refresh health status every 10 seconds
         setInterval(() => this.refreshHealthStatus(), 10000);
@@ -77,6 +91,7 @@ class App {
         this.elements.btnTestAll.addEventListener('click', () => this.testAllProxies());
         this.elements.btnClearProxies.addEventListener('click', () => this.clearAllProxies());
         this.elements.proxiesContainer.addEventListener('click', (e) => this.handleProxyClick(e));
+        this.elements.workspaceChipList?.addEventListener('click', (e) => this.handleWorkspaceChipClick(e));
         this.elements.proxiesContainer.addEventListener('contextmenu', (e) => {
             const item = e.target.closest('.proxy-item');
             if (item) {
@@ -126,6 +141,9 @@ class App {
 
             // Load proxies
             await this.loadProxies();
+
+            // Load workspace-aware lease status
+            await this.refreshLeaseData();
 
             // Update system status
             await this.updateSystemStatus();
@@ -540,9 +558,69 @@ class App {
 
         this.elements.proxiesContainer.innerHTML = '';
         this.proxies.forEach(proxy => {
-            const item = Components.proxyItem(proxy);
+            const item = Components.proxyItem(proxy, this.getProxyWorkspaceState(proxy));
             this.elements.proxiesContainer.appendChild(item);
         });
+    }
+
+    handleWorkspaceChipClick(e) {
+        const chip = e.target.closest('[data-workspace-id]');
+        if (!chip) return;
+        this.setCurrentWorkspace(chip.dataset.workspaceId);
+    }
+
+    getProxyWorkspaceState(proxy) {
+        if (!this.currentWorkspaceId) {
+            return {
+                stateClass: 'unscoped',
+                stateLabel: '未选择 workspace',
+                sourceLabel: '',
+                note: '请选择一个已有 workspace 后再做手动管理。',
+                canCooldown: false,
+                canRecall: false,
+            };
+        }
+
+        const activeLease = (this.leaseStatus.active_leases || []).find(
+            (lease) => lease.workspace_id === this.currentWorkspaceId && lease.proxy_port === proxy.port
+        );
+        if (activeLease) {
+            return {
+                stateClass: 'leased',
+                stateLabel: '已租约中',
+                sourceLabel: '',
+                note: `${this.currentWorkspaceId} 正在使用该代理。`,
+                canCooldown: false,
+                canRecall: false,
+            };
+        }
+
+        const cooldown = (this.leaseStatus.cooldowns || []).find(
+            (item) => item.workspace_id === this.currentWorkspaceId && item.proxy_port === proxy.port
+        );
+        if (cooldown) {
+            const sourceLabel = cooldown.source === 'manual' ? 'manual' : 'timed';
+            const note = cooldown.source === 'manual'
+                ? `${this.currentWorkspaceId} 已手动冷却该代理，召回后才会恢复。`
+                : `${this.currentWorkspaceId} 已进入定时冷却，可等待到期或手动召回。`;
+            return {
+                stateClass: 'cooldown',
+                stateLabel: '冷却中',
+                sourceLabel,
+                note,
+                canCooldown: false,
+                canRecall: true,
+            };
+        }
+
+        return {
+            stateClass: 'available',
+            stateLabel: '可用',
+            sourceLabel: '',
+            note: `${this.currentWorkspaceId} 可手动冷却该代理。`,
+            canCooldown: true,
+            canRecall: false,
+        };
     }
 
     /**
@@ -552,6 +630,9 @@ class App {
         const item = e.target.closest('.proxy-item');
         if (!item) return;
 
+        const button = e.target.closest('button');
+        if (button?.disabled) return;
+
         const action = e.target.closest('[data-action]')?.dataset.action;
         const port = parseInt(item.dataset.port);
 
@@ -559,6 +640,10 @@ class App {
             await this.copyProxyAddress(port);
         } else if (action === 'test') {
             await this.testSingleProxy(port);
+        } else if (action === 'cooldown') {
+            await this.setManualCooldown(port);
+        } else if (action === 'recall') {
+            await this.recallCooldown(port);
         } else if (action === 'remove') {
             await this.removeProxy(port);
         }
@@ -611,6 +696,36 @@ class App {
             Components.showToast('代理已移除', 'success');
         } catch (error) {
             Components.showToast(`移除失败: ${error.message}`, 'error');
+        }
+    }
+
+    async setManualCooldown(port) {
+        if (!this.currentWorkspaceId) {
+            Components.showToast('请先选择一个 workspace', 'warning');
+            return;
+        }
+
+        try {
+            await api.setManualLeaseCooldown(this.currentWorkspaceId, port);
+            await this.refreshLeaseData();
+            Components.showToast(`已为 ${this.currentWorkspaceId} 冷却代理 :${port}`, 'success');
+        } catch (error) {
+            Components.showToast(`冷却失败: ${error.message}`, 'error');
+        }
+    }
+
+    async recallCooldown(port) {
+        if (!this.currentWorkspaceId) {
+            Components.showToast('请先选择一个 workspace', 'warning');
+            return;
+        }
+
+        try {
+            await api.recallLeaseCooldown(this.currentWorkspaceId, port);
+            await this.refreshLeaseData();
+            Components.showToast(`已召回 ${this.currentWorkspaceId} 的代理 :${port}`, 'success');
+        } catch (error) {
+            Components.showToast(`召回失败: ${error.message}`, 'error');
         }
     }
 
@@ -952,14 +1067,6 @@ class App {
         // Load lease data when switching to leases tab
         if (tabName === 'leases') {
             this.refreshLeaseData();
-            // Start auto-refresh
-            this.leaseRefreshInterval = setInterval(() => this.refreshLeaseData(), 5000);
-        } else {
-            // Stop auto-refresh when leaving leases tab
-            if (this.leaseRefreshInterval) {
-                clearInterval(this.leaseRefreshInterval);
-                this.leaseRefreshInterval = null;
-            }
         }
     }
 
@@ -973,9 +1080,18 @@ class App {
                 api.getLeaseStatus()
             ]);
 
+            this.leaseStatus = {
+                active_leases: status.active_leases || [],
+                cooldowns: status.cooldowns || [],
+                workspaces: status.workspaces || [],
+                total_active: status.total_active || 0,
+                total_cooldowns: status.total_cooldowns || 0,
+            };
+            this.syncCurrentWorkspace();
             this.renderLeaseStats(stats);
-            this.renderActiveLeases(status.active_leases || []);
-            this.renderCooldownPool(status.cooldowns || []);
+            this.renderWorkspaceSelector();
+            this.renderCurrentWorkspaceLeaseViews();
+            this.renderProxies();
         } catch (error) {
             console.error('Failed to refresh lease data:', error);
         }
@@ -994,6 +1110,95 @@ class App {
         if (cooldownEl) cooldownEl.textContent = stats.total_cooldowns ?? '-';
     }
 
+    syncCurrentWorkspace() {
+        const workspaces = this.leaseStatus.workspaces || [];
+        const exists = workspaces.some((item) => item.workspace_id === this.currentWorkspaceId);
+        if (this.currentWorkspaceId && exists) {
+            return;
+        }
+
+        const nextWorkspace = workspaces[0]?.workspace_id || null;
+        this.setCurrentWorkspace(nextWorkspace, { persist: true, rerender: false });
+    }
+
+    setCurrentWorkspace(workspaceId, { persist = true, rerender = true } = {}) {
+        this.currentWorkspaceId = workspaceId || null;
+
+        if (persist) {
+            if (this.currentWorkspaceId) {
+                localStorage.setItem('xray-prism.currentWorkspaceId', this.currentWorkspaceId);
+            } else {
+                localStorage.removeItem('xray-prism.currentWorkspaceId');
+            }
+        }
+
+        if (rerender) {
+            this.renderWorkspaceSelector();
+            this.renderCurrentWorkspaceLeaseViews();
+            this.renderProxies();
+        }
+    }
+
+    renderWorkspaceSelector() {
+        const container = this.elements.workspaceChipList;
+        const title = this.elements.currentWorkspaceName;
+        const hint = this.elements.workspaceBarHint;
+        if (!container || !title || !hint) return;
+
+        const workspaces = this.leaseStatus.workspaces || [];
+        const currentSummary = workspaces.find((item) => item.workspace_id === this.currentWorkspaceId) || null;
+
+        if (!this.currentWorkspaceId || !currentSummary) {
+            title.textContent = '未选择';
+            hint.textContent = workspaces.length === 0
+                ? '暂无活跃租约或冷却记录，创建租约后会出现在这里。'
+                : '请选择一个 workspace 查看对应的租约和代理状态。';
+        } else {
+            title.textContent = currentSummary.workspace_id;
+            hint.textContent = `活跃 ${currentSummary.active_count} / 冷却 ${currentSummary.cooldown_count}`;
+        }
+
+        if (workspaces.length === 0) {
+            container.innerHTML = '<div class="workspace-empty">暂无可选 workspace</div>';
+            return;
+        }
+
+        container.innerHTML = workspaces.map((workspace) => {
+            const total = (workspace.active_count || 0) + (workspace.cooldown_count || 0);
+            const active = workspace.workspace_id === this.currentWorkspaceId ? ' active' : '';
+            return `
+                <button class="workspace-chip${active}" data-workspace-id="${this.escapeHtml(workspace.workspace_id)}">
+                    <span>${this.escapeHtml(workspace.workspace_id)}</span>
+                    <span class="workspace-chip-count">${total}</span>
+                </button>
+            `;
+        }).join('');
+    }
+
+    renderCurrentWorkspaceLeaseViews() {
+        const workspaceName = this.currentWorkspaceId || '当前 workspace';
+        const activeCaption = document.getElementById('active-lease-caption');
+        const cooldownCaption = document.getElementById('cooldown-caption');
+        if (activeCaption) activeCaption.textContent = workspaceName;
+        if (cooldownCaption) cooldownCaption.textContent = workspaceName;
+
+        if (!this.currentWorkspaceId) {
+            this.renderActiveLeases([]);
+            this.renderCooldownPool([]);
+            return;
+        }
+
+        const activeLeases = (this.leaseStatus.active_leases || []).filter(
+            (lease) => lease.workspace_id === this.currentWorkspaceId
+        );
+        const cooldowns = (this.leaseStatus.cooldowns || []).filter(
+            (cooldown) => cooldown.workspace_id === this.currentWorkspaceId
+        );
+
+        this.renderActiveLeases(activeLeases);
+        this.renderCooldownPool(cooldowns);
+    }
+
     /**
      * Render active leases list
      */
@@ -1001,10 +1206,19 @@ class App {
         const container = document.getElementById('active-leases-list');
         if (!container) return;
 
+        if (!this.currentWorkspaceId) {
+            container.innerHTML = `
+                <div class="empty-state small">
+                    <p>请选择 workspace 后查看活跃租约</p>
+                </div>
+            `;
+            return;
+        }
+
         if (leases.length === 0) {
             container.innerHTML = `
                 <div class="empty-state small">
-                    <p>暂无活跃租约</p>
+                    <p>当前 workspace 暂无活跃租约</p>
                 </div>
             `;
             return;
@@ -1036,27 +1250,40 @@ class App {
         const container = document.getElementById('cooldown-list');
         if (!container) return;
 
+        if (!this.currentWorkspaceId) {
+            container.innerHTML = `
+                <div class="empty-state small">
+                    <p>请选择 workspace 后查看冷却代理</p>
+                </div>
+            `;
+            return;
+        }
+
         if (cooldowns.length === 0) {
             container.innerHTML = `
                 <div class="empty-state small">
-                    <p>无冷却中的代理</p>
+                    <p>当前 workspace 无冷却中的代理</p>
                 </div>
             `;
             return;
         }
 
         container.innerHTML = cooldowns.map(cd => {
-            const until = new Date(cd.until);
+            const until = cd.until ? new Date(cd.until) : null;
             const now = new Date();
-            const remainingSeconds = Math.max(0, Math.floor((until - now) / 1000));
+            const remainingSeconds = until ? Math.max(0, Math.floor((until - now) / 1000)) : null;
+            const timerLabel = cd.source === 'manual'
+                ? '手动召回'
+                : this.formatTime(remainingSeconds ?? 0);
 
             return `
                 <div class="lease-item" data-port="${cd.proxy_port}">
                     <span class="lease-item-port">${cd.proxy_port}</span>
                     <div class="lease-item-info">
                         <span class="lease-item-workspace">${this.escapeHtml(cd.workspace_id)}</span>
+                        <span class="lease-item-meta">${cd.source === 'manual' ? '手动冷却' : '定时冷却'}</span>
                     </div>
-                    <span class="lease-item-timer">${this.formatTime(remainingSeconds)}</span>
+                    <span class="lease-item-timer">${timerLabel}</span>
                 </div>
             `;
         }).join('');
@@ -1090,6 +1317,7 @@ class App {
 
             // Refresh data
             await this.refreshLeaseData();
+            this.setCurrentWorkspace(workspaceId);
         } catch (error) {
             this.showPlaygroundResult({ error: error.message }, false);
         }
@@ -1117,6 +1345,9 @@ class App {
 
             // Refresh data
             await this.refreshLeaseData();
+            if ((this.leaseStatus.workspaces || []).some((item) => item.workspace_id === workspaceId)) {
+                this.setCurrentWorkspace(workspaceId);
+            }
         } catch (error) {
             this.showPlaygroundResult({ error: error.message }, false);
         }

@@ -17,6 +17,11 @@ class LeaseAcquireRequest(TypedDict):
     workspace_id: str
     ttl: NotRequired[int]
 
+class LeaseCooldownRequest(TypedDict):
+    """Request model for manual cooldown/recall operations."""
+    workspace_id: str
+    proxy_port: int
+
 class LeaseReleaseRequest(TypedDict):
     """Request model for releasing a proxy lease."""
     workspace_id: str
@@ -27,3 +32,8 @@ class ProxyAddRequest(TypedDict):
     """Request model for adding nodes to proxy list."""
     node_ids: list[str]
     start_port: NotRequired[int]
+
+class SubscriptionCreate(TypedDict):
+    """Request model for creating a new subscription."""
+    name: str
+    url: str
