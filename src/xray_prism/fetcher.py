@@ -12,6 +12,14 @@ from pathlib import Path
 
 import requests
 
+try:
+    import brotli as _brotli
+except ImportError:
+    try:
+        import brotlicffi as _brotli
+    except ImportError:
+        _brotli = None
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -26,6 +34,16 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+HAS_BROTLI = _brotli is not None
+
+
+def build_accept_encoding() -> str:
+    """构造当前环境可安全声明的 Accept-Encoding。"""
+    encodings = ["gzip", "deflate"]
+    if HAS_BROTLI:
+        encodings.append("br")
+    return ", ".join(encodings)
 
 
 def decode_base64(content: str) -> str:
@@ -120,7 +138,7 @@ def fetch_from_url(
         'User-Agent': user_agent or 'ClashforWindows/0.20.39',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Encoding': build_accept_encoding(),
         'Connection': 'keep-alive',
         'Cache-Control': 'no-cache',
     }
@@ -129,7 +147,11 @@ def fetch_from_url(
         logger.info(f"正在从 URL 获取订阅: {url}")
         response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
         response.raise_for_status()
-        
+
+        content_encoding = (response.headers.get('Content-Encoding') or '').lower()
+        if 'br' in content_encoding and not HAS_BROTLI:
+            raise FetchError("订阅响应使用 Brotli(br) 压缩，但当前环境未启用该解码支持")
+
         content = response.text.strip()
         
         if not content:

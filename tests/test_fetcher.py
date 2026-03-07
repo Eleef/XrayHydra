@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 from xray_prism.fetcher import (
+    build_accept_encoding,
     decode_base64,
     is_base64_encoded,
     fetch_from_url,
@@ -82,28 +83,38 @@ class TestIsBase64Encoded:
 
 class TestFetchFromUrl:
     """URL 获取测试"""
-    
+
+    @patch('xray_prism.fetcher.HAS_BROTLI', False)
+    def test_build_accept_encoding_default(self):
+        """测试默认仅声明环境支持的压缩编码"""
+        encoding = build_accept_encoding()
+        assert encoding == "gzip, deflate"
+
     @patch('xray_prism.fetcher.requests.get')
     def test_fetch_plain_content(self, mock_get):
         """测试获取明文内容"""
         mock_response = MagicMock()
         mock_response.text = "vmess://test1\nvless://test2"
+        mock_response.headers = {}
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = fetch_from_url("https://example.com/sub")
-        
+
         assert "vmess://test1" in result
         assert "vless://test2" in result
-    
+        headers = mock_get.call_args.kwargs["headers"]
+        assert headers["Accept-Encoding"] == build_accept_encoding()
+
     @patch('xray_prism.fetcher.requests.get')
     def test_fetch_base64_content(self, mock_get):
         """测试获取并解码 Base64 内容"""
         original = "vmess://test1\nvless://test2"
         encoded = base64.b64encode(original.encode()).decode()
-        
+
         mock_response = MagicMock()
         mock_response.text = encoded
+        mock_response.headers = {}
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
         
@@ -134,10 +145,24 @@ class TestFetchFromUrl:
         """测试空内容"""
         mock_response = MagicMock()
         mock_response.text = ""
+        mock_response.headers = {}
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         with pytest.raises(FetchError, match="订阅内容为空"):
+            fetch_from_url("https://example.com/sub")
+
+    @patch('xray_prism.fetcher.HAS_BROTLI', False)
+    @patch('xray_prism.fetcher.requests.get')
+    def test_fetch_brotli_without_support(self, mock_get):
+        """测试未启用 Brotli 支持时返回明确错误"""
+        mock_response = MagicMock()
+        mock_response.text = "binary-data"
+        mock_response.headers = {"Content-Encoding": "br"}
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with pytest.raises(FetchError, match="Brotli"):
             fetch_from_url("https://example.com/sub")
 
 
