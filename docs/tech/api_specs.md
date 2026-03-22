@@ -260,6 +260,8 @@ Last Updated: 2026-03-22
     ```json
     {
       "id": "node_xxx",
+      "group_id": "sub_xxx",
+      "group_type": "subscription",
       "subscription_id": "sub_xxx",
       "name": "HK-01",
       "test_status": "pending",
@@ -267,6 +269,9 @@ Last Updated: 2026-03-22
       "proxy_port": null
     }
     ```
+*   **Notes**:
+    *   `group_id` / `group_type` 用于前端统一渲染“节点组”视图。
+    *   订阅节点保留 `subscription_id`；自定义组节点的 `subscription_id = null`。
 
 ### **Test Nodes (Batch / Single)**
 *   **Endpoint**: `POST /test`
@@ -369,6 +374,56 @@ Last Updated: 2026-03-22
       "name": "My Sub"
     }
     ```
+
+---
+
+## **6. Custom Group API (自定义节点组)**
+
+> Base Path: `/api/custom-groups`
+
+### **List Custom Groups**
+*   **Endpoint**: `GET /`
+*   **OperationId**: `listCustomGroups`
+*   **Summary**: 获取所有自定义节点组元数据。
+
+### **Create Custom Group**
+*   **Endpoint**: `POST /`
+*   **OperationId**: `createCustomGroup`
+*   **Summary**: 创建一个空的自定义节点组。
+
+### **Rename Custom Group**
+*   **Endpoint**: `PATCH /{group_id}`
+*   **OperationId**: `renameCustomGroup`
+*   **Summary**: 重命名自定义节点组。
+
+### **Delete Custom Group**
+*   **Endpoint**: `DELETE /{group_id}`
+*   **OperationId**: `deleteCustomGroup`
+*   **Summary**: 删除自定义节点组及其快照节点。
+
+### **List Custom Group Nodes**
+*   **Endpoint**: `GET /{group_id}/nodes`
+*   **OperationId**: `listCustomGroupNodes`
+*   **Summary**: 获取某个自定义组的快照节点列表，返回结构与订阅节点一致。
+
+### **Import Custom Group Nodes**
+*   **Endpoint**: `POST /{group_id}/nodes/import`
+*   **OperationId**: `importCustomGroupNodes`
+*   **Summary**: 通过粘贴多行节点链接导入到指定自定义组。
+*   **Behavior**:
+    *   只接受当前 Xray 可运行协议。
+    *   `SSR` 等不支持协议会沿用现有明确报错逻辑。
+    *   同组内按连接语义去重。
+
+### **Copy Nodes To Custom Group**
+*   **Endpoint**: `POST /{group_id}/nodes/copy`
+*   **OperationId**: `copyNodesToCustomGroup`
+*   **Summary**: 从当前节点列表复制快照到指定自定义组，支持来源为订阅节点或另一个自定义组节点。
+
+### **Delete Custom Group Node**
+*   **Endpoint**: `DELETE /{group_id}/nodes/{node_id}`
+*   **OperationId**: `deleteCustomGroupNode`
+*   **Summary**: 从自定义组中移除单个节点快照，不影响来源订阅或其他自定义组。
 
 ### **Refresh Subscription**
 *   **Endpoint**: `POST /{sub_id}/refresh`

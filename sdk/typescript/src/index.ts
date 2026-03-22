@@ -87,6 +87,38 @@ export class XrayPrismClient {
     return this.request('GET', `/api/subscriptions/${sub_id}/nodes`, undefined, undefined, false);
   }
 
+  async list_custom_groups(): Promise<models.CustomGroupListResponse> {
+    return this.request('GET', `/api/custom-groups`, undefined, undefined, false);
+  }
+
+  async create_custom_group(payload: models.CustomGroupCreateRequest): Promise<models.CustomGroupResponse> {
+    return this.request('POST', `/api/custom-groups`, undefined, payload, false);
+  }
+
+  async rename_custom_group(group_id: string, payload: models.CustomGroupRenameRequest): Promise<models.CustomGroupResponse> {
+    return this.request('PATCH', `/api/custom-groups/${group_id}`, undefined, payload, false);
+  }
+
+  async delete_custom_group(group_id: string): Promise<models.SuccessResponse> {
+    return this.request('DELETE', `/api/custom-groups/${group_id}`, undefined, undefined, false);
+  }
+
+  async list_custom_group_nodes(group_id: string): Promise<models.NodeListResponse> {
+    return this.request('GET', `/api/custom-groups/${group_id}/nodes`, undefined, undefined, false);
+  }
+
+  async import_custom_group_nodes(group_id: string, payload: models.CustomGroupImportRequest): Promise<models.CustomGroupImportResponse> {
+    return this.request('POST', `/api/custom-groups/${group_id}/nodes/import`, undefined, payload, false);
+  }
+
+  async copy_nodes_to_custom_group(group_id: string, payload: models.CustomGroupCopyNodesRequest): Promise<models.CustomGroupCopyNodesResponse> {
+    return this.request('POST', `/api/custom-groups/${group_id}/nodes/copy`, undefined, payload, false);
+  }
+
+  async delete_custom_group_node(group_id: string, node_id: string): Promise<models.SuccessResponse> {
+    return this.request('DELETE', `/api/custom-groups/${group_id}/nodes/${node_id}`, undefined, undefined, false);
+  }
+
   async get_node(node_id: string): Promise<models.NodeResponse> {
     return this.request('GET', `/api/nodes/${node_id}`, undefined, undefined, false);
   }

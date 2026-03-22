@@ -35,6 +35,11 @@ class TestStatus(str, Enum):
     FAILED = "failed"
 
 
+class GroupType(str, Enum):
+    SUBSCRIPTION = "subscription"
+    CUSTOM = "custom"
+
+
 class NodeTestJobStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -94,6 +99,8 @@ class NodeResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "id": "node_sub_ab12cd34_0000",
+                "group_id": "sub_ab12cd34",
+                "group_type": "subscription",
                 "subscription_id": "sub_ab12cd34",
                 "name": "HK-01",
                 "protocol": "trojan",
@@ -109,7 +116,9 @@ class NodeResponse(BaseModel):
         }
     )
     id: str
-    subscription_id: str
+    group_id: str
+    group_type: GroupType
+    subscription_id: Optional[str] = None
     name: str
     protocol: ProtocolType
     address: str
@@ -142,6 +151,99 @@ class NodeListResponse(BaseModel):
     """Response model for list of nodes."""
     nodes: List[NodeResponse]
     total: int
+
+
+# ==================== Custom Group Schemas ====================
+
+class CustomGroupCreateRequest(BaseModel):
+    """Request model for creating a custom node group."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "My Favorites",
+            }
+        }
+    )
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class CustomGroupRenameRequest(BaseModel):
+    """Request model for renaming a custom node group."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "My Favorites (Updated)",
+            }
+        }
+    )
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class CustomGroupImportRequest(BaseModel):
+    """Request model for importing nodes into a custom node group."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "content": "vmess://...\ntrojan://...",
+            }
+        }
+    )
+    content: str = Field(..., min_length=1)
+
+
+class CustomGroupCopyNodesRequest(BaseModel):
+    """Request model for copying existing nodes into a custom group."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "source_node_ids": ["node_sub_ab12cd34_0000", "node_sub_ab12cd34_0001"],
+            }
+        }
+    )
+    source_node_ids: List[str] = Field(..., min_length=1)
+
+
+class CustomGroupResponse(BaseModel):
+    """Response model for custom node group metadata."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "grp_1a2b3c4d",
+                "name": "My Favorites",
+                "group_type": "custom",
+                "node_count": 8,
+                "created_at": "2026-03-07T03:09:00",
+                "updated_at": "2026-03-07T03:10:00",
+            }
+        }
+    )
+    id: str
+    name: str
+    group_type: GroupType = GroupType.CUSTOM
+    node_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class CustomGroupListResponse(BaseModel):
+    """Response model for custom node group list."""
+    groups: List[CustomGroupResponse]
+    total: int
+
+
+class CustomGroupImportResponse(BaseModel):
+    """Response model for importing nodes into a custom group."""
+    imported_count: int
+    skipped_duplicates: int
+    total_parsed: int
+
+
+class CustomGroupCopyNodesResponse(BaseModel):
+    """Response model for copying nodes into a custom group."""
+    copied_count: int
+    skipped_duplicates: int
+    total_requested: int
+    missing_node_ids: List[str] = Field(default_factory=list)
 
 
 class NodeTestResult(BaseModel):

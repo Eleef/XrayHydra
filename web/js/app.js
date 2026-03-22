@@ -7,13 +7,18 @@ const ALL_WORKSPACES_ID = '__all_workspaces__';
 const GLOBAL_WORKSPACE_ID = '__global__';
 const NODE_EXCLUSION_STORAGE_KEY = 'xray-prism.nodeExclusionKeywords';
 const CURRENT_SUBSCRIPTION_STORAGE_KEY = 'xray-prism.currentSubscriptionId';
+const CURRENT_GROUP_STORAGE_KEY = 'xray-prism.currentGroup';
 
 class App {
     constructor() {
         // State
         this.subscriptions = [];
+        this.customGroups = [];
+        this.groups = [];
         this.currentSubscription = null;
+        this.currentGroup = null;
         this.currentSubscriptionId = localStorage.getItem(CURRENT_SUBSCRIPTION_STORAGE_KEY) || null;
+        this.currentGroupKey = localStorage.getItem(CURRENT_GROUP_STORAGE_KEY) || null;
         this.nodes = [];
         this.selectedNodeIds = new Set();
         this.isNodeTesting = false;
@@ -70,6 +75,7 @@ class App {
             btnTestSelectedNodes: document.getElementById('btn-test-selected-nodes'),
             btnTestAllNodes: document.getElementById('btn-test-all-nodes'),
             btnAddSuccessToProxy: document.getElementById('btn-add-success-to-proxy'),
+            btnAddToGroup: document.getElementById('btn-add-to-group'),
             btnAddToProxy: document.getElementById('btn-add-to-proxy'),
             nodeFilterAvailable: document.getElementById('node-filter-available'),
             nodeFilterNotInPool: document.getElementById('node-filter-not-in-pool'),
@@ -101,7 +107,20 @@ class App {
             workspaceBarHint: document.getElementById('workspace-bar-hint'),
             btnResetWorkspace: document.getElementById('btn-reset-workspace'),
             cooldownList: document.getElementById('cooldown-list'),
+            modalCreateGroupEntry: document.getElementById('modal-create-group-entry'),
             modalAddSubscription: document.getElementById('modal-add-subscription'),
+            btnOpenAddSubscription: document.getElementById('btn-open-add-subscription'),
+            btnOpenAddCustomGroup: document.getElementById('btn-open-add-custom-group'),
+            modalAddCustomGroup: document.getElementById('modal-add-custom-group'),
+            customGroupName: document.getElementById('custom-group-name'),
+            customGroupImportMode: document.getElementById('custom-group-import-mode'),
+            customGroupContentWrap: document.getElementById('custom-group-content-wrap'),
+            customGroupContent: document.getElementById('custom-group-content'),
+            btnConfirmAddCustomGroup: document.getElementById('btn-confirm-add-custom-group'),
+            modalCopyToGroup: document.getElementById('modal-copy-to-group'),
+            copyGroupSelect: document.getElementById('copy-group-select'),
+            copyGroupNewName: document.getElementById('copy-group-new-name'),
+            btnConfirmCopyToGroup: document.getElementById('btn-confirm-copy-to-group'),
             modalTestCooldownReview: document.getElementById('modal-test-cooldown-review'),
             testCooldownReviewMeta: document.getElementById('test-cooldown-review-meta'),
             testCooldownReviewList: document.getElementById('test-cooldown-review-list'),
@@ -143,8 +162,8 @@ class App {
         // Header
         this.elements.btnToggleXray.addEventListener('click', () => this.toggleXray());
 
-        // Subscription
-        this.elements.btnAddSubscription.addEventListener('click', () => this.openAddSubscriptionModal());
+        // Groups
+        this.elements.btnAddSubscription.addEventListener('click', () => this.openCreateGroupEntryModal());
         this.elements.subscriptionList.addEventListener('click', (e) => this.handleSubscriptionClick(e));
 
         // Nodes
@@ -169,6 +188,7 @@ class App {
         this.elements.btnTestSelectedNodes?.addEventListener('click', () => this.testSelectedNodes());
         this.elements.btnTestAllNodes?.addEventListener('click', () => this.testAllNodes());
         this.elements.btnAddSuccessToProxy?.addEventListener('click', () => this.addSuccessfulToProxy());
+        this.elements.btnAddToGroup?.addEventListener('click', () => this.openCopyToGroupModal());
         this.elements.btnAddToProxy.addEventListener('click', () => this.addSelectedToProxy());
         this.elements.nodesContainer.addEventListener('click', (e) => this.handleNodeClick(e));
         this.elements.nodesContainer.addEventListener('change', (e) => this.handleNodeCheckbox(e));
@@ -191,11 +211,31 @@ class App {
 
         // Modal
         this.elements.btnConfirmAdd.addEventListener('click', () => this.confirmAddSubscription());
+        this.elements.btnOpenAddSubscription?.addEventListener('click', () => this.openAddSubscriptionModal());
+        this.elements.btnOpenAddCustomGroup?.addEventListener('click', () => this.openAddCustomGroupModal());
+        this.elements.customGroupImportMode?.addEventListener('change', () => this.handleCustomGroupImportModeChange());
+        this.elements.btnConfirmAddCustomGroup?.addEventListener('click', () => this.confirmAddCustomGroup());
+        this.elements.btnConfirmCopyToGroup?.addEventListener('click', () => this.confirmCopyToGroup());
         document.querySelectorAll('[data-close-modal]').forEach(btn => {
             btn.addEventListener('click', () => this.closeModals());
         });
+        this.elements.modalCreateGroupEntry?.addEventListener('click', (e) => {
+            if (e.target === this.elements.modalCreateGroupEntry) {
+                this.closeModals();
+            }
+        });
         this.elements.modalAddSubscription.addEventListener('click', (e) => {
             if (e.target === this.elements.modalAddSubscription) {
+                this.closeModals();
+            }
+        });
+        this.elements.modalAddCustomGroup?.addEventListener('click', (e) => {
+            if (e.target === this.elements.modalAddCustomGroup) {
+                this.closeModals();
+            }
+        });
+        this.elements.modalCopyToGroup?.addEventListener('click', (e) => {
+            if (e.target === this.elements.modalCopyToGroup) {
                 this.closeModals();
             }
         });
@@ -254,178 +294,297 @@ class App {
         }
     }
 
-    // ==================== Subscriptions ====================
+    // ==================== Groups ====================
 
-    /**
-     * Load and render subscriptions
-     */
+    getGroupKey(groupType, id) {
+        return `${groupType}:${id}`;
+    }
+
+    getGroupFromKey(groupKey) {
+        if (!groupKey || typeof groupKey !== 'string') return null;
+        const [groupType, id] = groupKey.split(':', 2);
+        if (!groupType || !id) return null;
+        return this.groups.find((item) => item.group_type === groupType && item.id === id) || null;
+    }
+
     async loadSubscriptions() {
         try {
-            const data = await api.getSubscriptions();
-            this.subscriptions = data.subscriptions || [];
+            const [subscriptionData, customGroupData] = await Promise.all([
+                api.getSubscriptions(),
+                api.getCustomGroups(),
+            ]);
+            this.subscriptions = subscriptionData.subscriptions || [];
+            this.customGroups = customGroupData.groups || [];
+            this.groups = [
+                ...this.subscriptions.map((item) => ({ ...item, group_type: 'subscription' })),
+                ...this.customGroups.map((item) => ({ ...item, group_type: 'custom' })),
+            ];
             this.renderSubscriptions();
             await this.restoreSubscriptionSelection();
         } catch (error) {
-            console.error('Failed to load subscriptions:', error);
+            console.error('Failed to load groups:', error);
             this.elements.subscriptionList.innerHTML = `
                 <div class="empty-state">
-                    <p>加载订阅失败</p>
+                    <p>加载节点组失败</p>
                 </div>
             `;
         }
     }
 
-    /**
-     * Render subscriptions list
-     */
     renderSubscriptions() {
-        if (this.subscriptions.length === 0) {
+        if (this.groups.length === 0) {
             this.currentSubscription = null;
             this.currentSubscriptionId = null;
+            this.currentGroup = null;
+            this.currentGroupKey = null;
             localStorage.removeItem(CURRENT_SUBSCRIPTION_STORAGE_KEY);
+            localStorage.removeItem(CURRENT_GROUP_STORAGE_KEY);
             this.elements.subscriptionList.innerHTML = `
                 <div class="empty-state">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                     </svg>
-                    <p>暂无订阅</p>
-                    <span class="hint">点击上方"添加"按钮添加订阅</span>
+                    <p>暂无节点组</p>
+                    <span class="hint">点击上方 + 新建订阅组或自定义组</span>
                 </div>
             `;
             return;
         }
 
         this.elements.subscriptionList.innerHTML = '';
-        this.subscriptions.forEach(sub => {
-            const isActive = this.currentSubscription?.id === sub.id;
-            const item = Components.subscriptionItem(sub, isActive);
+        this.groups.forEach((group) => {
+            const isActive = this.currentGroup?.id === group.id && this.currentGroup?.group_type === group.group_type;
+            const item = Components.groupItem(group, isActive);
             this.elements.subscriptionList.appendChild(item);
         });
     }
 
     async restoreSubscriptionSelection() {
-        if (this.subscriptions.length === 0) {
-            return;
-        }
+        if (this.groups.length === 0) return;
 
-        const hasCurrentSelection = this.currentSubscription
-            && this.subscriptions.some((sub) => sub.id === this.currentSubscription.id);
-        if (hasCurrentSelection) {
-            return;
-        }
-
-        const preferredId = this.subscriptions.some((sub) => sub.id === this.currentSubscriptionId)
-            ? this.currentSubscriptionId
-            : this.subscriptions[0]?.id;
-
-        if (preferredId) {
-            await this.selectSubscription(preferredId);
+        const preferredFromGroup = this.getGroupFromKey(this.currentGroupKey);
+        const preferredFromLegacy = this.subscriptions.find((sub) => sub.id === this.currentSubscriptionId)
+            ? this.groups.find((item) => item.group_type === 'subscription' && item.id === this.currentSubscriptionId)
+            : null;
+        const preferred = preferredFromGroup || preferredFromLegacy || this.groups[0];
+        if (preferred) {
+            await this.selectGroup(preferred.group_type, preferred.id);
         }
     }
 
-    /**
-     * Handle subscription item click
-     */
     async handleSubscriptionClick(e) {
         const item = e.target.closest('.subscription-item');
         if (!item) return;
 
         const action = e.target.closest('[data-action]')?.dataset.action;
-        const subId = item.dataset.id;
+        const groupId = item.dataset.id;
+        const groupType = item.dataset.groupType || 'subscription';
 
-        if (action === 'refresh') {
-            await this.refreshSubscription(subId);
-        } else if (action === 'delete') {
-            await this.deleteSubscription(subId);
-        } else {
-            await this.selectSubscription(subId);
+        if (action === 'refresh' && groupType === 'subscription') {
+            await this.refreshSubscription(groupId);
+            return;
         }
+        if (action === 'rename' && groupType === 'custom') {
+            await this.renameCustomGroup(groupId);
+            return;
+        }
+        if (action === 'delete') {
+            if (groupType === 'custom') {
+                await this.deleteCustomGroup(groupId);
+            } else {
+                await this.deleteSubscription(groupId);
+            }
+            return;
+        }
+        await this.selectGroup(groupType, groupId);
     }
 
-    /**
-     * Select a subscription and load its nodes
-     */
-    async selectSubscription(subId) {
-        const sub = this.subscriptions.find(s => s.id === subId);
-        if (!sub) return;
+    async selectGroup(groupType, groupId) {
+        const group = this.groups.find((item) => item.group_type === groupType && item.id === groupId);
+        if (!group) return;
 
-        this.currentSubscription = sub;
-        this.currentSubscriptionId = subId;
-        localStorage.setItem(CURRENT_SUBSCRIPTION_STORAGE_KEY, subId);
+        this.currentGroup = group;
+        this.currentGroupKey = this.getGroupKey(groupType, groupId);
+        localStorage.setItem(CURRENT_GROUP_STORAGE_KEY, this.currentGroupKey);
+        if (groupType === 'subscription') {
+            this.currentSubscription = this.subscriptions.find((item) => item.id === groupId) || null;
+            this.currentSubscriptionId = groupId;
+            localStorage.setItem(CURRENT_SUBSCRIPTION_STORAGE_KEY, groupId);
+        } else {
+            this.currentSubscription = null;
+            this.currentSubscriptionId = null;
+            localStorage.removeItem(CURRENT_SUBSCRIPTION_STORAGE_KEY);
+        }
         this.selectedNodeIds.clear();
         this.updateAddToProxyButton();
 
-        // Update UI
-        document.querySelectorAll('.subscription-item').forEach(el => {
-            el.classList.toggle('active', el.dataset.id === subId);
+        document.querySelectorAll('.subscription-item').forEach((el) => {
+            el.classList.toggle(
+                'active',
+                el.dataset.id === groupId && (el.dataset.groupType || 'subscription') === groupType
+            );
         });
 
-        // Load nodes
-        await this.loadNodes(subId);
+        await this.loadNodes(groupId, groupType);
     }
 
-    /**
-     * Refresh a subscription
-     */
+    async selectSubscription(subId) {
+        await this.selectGroup('subscription', subId);
+    }
+
     async refreshSubscription(subId) {
         try {
-            Components.showToast('正在刷新订阅...', 'info');
+            Components.showToast('正在刷新订阅组...', 'info');
             const result = await api.refreshSubscription(subId);
-
-            // Update local data
-            const index = this.subscriptions.findIndex(s => s.id === subId);
+            const index = this.subscriptions.findIndex((item) => item.id === subId);
             if (index !== -1) {
                 this.subscriptions[index] = result;
             }
-
-            this.renderSubscriptions();
-
-            // Reload nodes if this is the current subscription
-            if (this.currentSubscription?.id === subId) {
-                await this.loadNodes(subId);
+            await this.loadSubscriptions();
+            if (this.currentGroup?.id === subId && this.currentGroup?.group_type === 'subscription') {
+                await this.loadNodes(subId, 'subscription');
             }
-
             Components.showToast(`刷新成功，共 ${result.node_count} 个节点`, 'success');
         } catch (error) {
             Components.showToast(`刷新失败: ${error.message}`, 'error');
         }
     }
 
-    /**
-     * Delete a subscription
-     */
     async deleteSubscription(subId) {
-        if (!confirm('确定要删除这个订阅吗？')) return;
+        if (!confirm('确定要删除这个订阅组吗？')) return;
 
         try {
             await api.deleteSubscription(subId);
-            this.subscriptions = this.subscriptions.filter(s => s.id !== subId);
+            this.subscriptions = this.subscriptions.filter((item) => item.id !== subId);
+            this.groups = this.groups.filter((item) => !(item.group_type === 'subscription' && item.id === subId));
 
-            if (this.currentSubscription?.id === subId) {
+            if (this.currentGroup?.group_type === 'subscription' && this.currentGroup?.id === subId) {
+                this.currentGroup = null;
+                this.currentGroupKey = null;
+                localStorage.removeItem(CURRENT_GROUP_STORAGE_KEY);
                 this.currentSubscription = null;
                 this.currentSubscriptionId = null;
                 localStorage.removeItem(CURRENT_SUBSCRIPTION_STORAGE_KEY);
                 this.nodes = [];
                 this.renderNodes();
             }
-
             this.renderSubscriptions();
             await this.restoreSubscriptionSelection();
-            Components.showToast('订阅已删除', 'success');
+            Components.showToast('订阅组已删除', 'success');
         } catch (error) {
             Components.showToast(`删除失败: ${error.message}`, 'error');
         }
     }
 
-    /**
-     * Open add subscription modal
-     */
+    openCreateGroupEntryModal() {
+        this.elements.modalCreateGroupEntry?.classList.add('active');
+    }
+
     openAddSubscriptionModal() {
         this.elements.subName.value = '';
         this.elements.subUrl.value = '';
+        this.elements.modalCreateGroupEntry?.classList.remove('active');
         this.elements.modalAddSubscription.classList.add('active');
         this.elements.subName.focus();
+    }
+
+    openAddCustomGroupModal() {
+        if (this.elements.customGroupName) this.elements.customGroupName.value = '';
+        if (this.elements.customGroupImportMode) this.elements.customGroupImportMode.value = 'none';
+        if (this.elements.customGroupContent) this.elements.customGroupContent.value = '';
+        this.handleCustomGroupImportModeChange();
+        this.elements.modalCreateGroupEntry?.classList.remove('active');
+        this.elements.modalAddCustomGroup?.classList.add('active');
+        this.elements.customGroupName?.focus();
+    }
+
+    handleCustomGroupImportModeChange() {
+        if (!this.elements.customGroupImportMode || !this.elements.customGroupContentWrap) return;
+        const mode = this.elements.customGroupImportMode.value;
+        this.elements.customGroupContentWrap.classList.toggle('hidden', mode !== 'paste');
+    }
+
+    async confirmAddCustomGroup() {
+        const name = (this.elements.customGroupName?.value || '').trim();
+        const mode = this.elements.customGroupImportMode?.value || 'none';
+        const content = (this.elements.customGroupContent?.value || '').trim();
+        if (!name) {
+            Components.showToast('请输入分组名称', 'warning');
+            return;
+        }
+        if (mode === 'paste' && !content) {
+            Components.showToast('请输入节点内容', 'warning');
+            return;
+        }
+
+        try {
+            const group = await api.createCustomGroup(name);
+            let imported = false;
+            if (mode === 'paste') {
+                try {
+                    const importResult = await api.importCustomGroupNodes(group.id, content);
+                    imported = true;
+                    Components.showToast(
+                        `导入完成: ${importResult.imported_count} 新增，${importResult.skipped_duplicates} 重复`,
+                        'success'
+                    );
+                } catch (error) {
+                    try {
+                        await api.deleteCustomGroup(group.id);
+                    } catch (cleanupError) {
+                        console.warn('Failed to rollback empty custom group after import error:', cleanupError);
+                    }
+                    throw error;
+                }
+            }
+            await this.loadSubscriptions();
+            this.closeModals();
+            await this.selectGroup('custom', group.id);
+            Components.showToast(imported ? '自定义分组已创建并导入节点' : '自定义分组已创建', 'success');
+        } catch (error) {
+            Components.showToast(`创建失败: ${error.message}`, 'error');
+        }
+    }
+
+    async renameCustomGroup(groupId) {
+        const target = this.customGroups.find((item) => item.id === groupId);
+        if (!target) return;
+        const nextName = prompt('请输入新的分组名称', target.name);
+        if (nextName === null) return;
+        const trimmed = nextName.trim();
+        if (!trimmed) {
+            Components.showToast('分组名称不能为空', 'warning');
+            return;
+        }
+        try {
+            await api.renameCustomGroup(groupId, trimmed);
+            await this.loadSubscriptions();
+            Components.showToast('分组已重命名', 'success');
+        } catch (error) {
+            Components.showToast(`重命名失败: ${error.message}`, 'error');
+        }
+    }
+
+    async deleteCustomGroup(groupId) {
+        if (!confirm('确定要删除这个自定义分组吗？')) return;
+        try {
+            await api.deleteCustomGroup(groupId);
+            this.customGroups = this.customGroups.filter((item) => item.id !== groupId);
+            this.groups = this.groups.filter((item) => !(item.group_type === 'custom' && item.id === groupId));
+            if (this.currentGroup?.group_type === 'custom' && this.currentGroup?.id === groupId) {
+                this.currentGroup = null;
+                this.currentGroupKey = null;
+                localStorage.removeItem(CURRENT_GROUP_STORAGE_KEY);
+                this.nodes = [];
+                this.renderNodes();
+            }
+            this.renderSubscriptions();
+            await this.restoreSubscriptionSelection();
+            Components.showToast('自定义分组已删除', 'success');
+        } catch (error) {
+            Components.showToast(`删除失败: ${error.message}`, 'error');
+        }
     }
 
     /**
@@ -623,13 +782,12 @@ class App {
 
         try {
             const result = await api.createSubscription(name, url);
-            this.subscriptions.push(result);
-            this.renderSubscriptions();
+            await this.loadSubscriptions();
             this.closeModals();
             Components.showToast(`添加成功，共 ${result.node_count} 个节点`, 'success');
 
             // Auto-select the new subscription
-            await this.selectSubscription(result.id);
+            await this.selectGroup('subscription', result.id);
         } catch (error) {
             Components.showToast(`添加失败: ${error.message}`, 'error');
         } finally {
@@ -642,9 +800,9 @@ class App {
     // ==================== Nodes ====================
 
     /**
-     * Load nodes for a subscription
+     * Load nodes for a group
      */
-    async loadNodes(subId) {
+    async loadNodes(groupId, groupType = 'subscription') {
         this.setNodeTestProgress({
             active: false,
             total: 0,
@@ -662,7 +820,9 @@ class App {
         `;
 
         try {
-            const data = await api.getSubscriptionNodes(subId);
+            const data = groupType === 'custom'
+                ? await api.getCustomGroupNodes(groupId)
+                : await api.getSubscriptionNodes(groupId);
             this.nodes = this.mergeProxyPoolState(data.nodes || []);
             this.syncSelectedNodeIds();
             this.renderNodeExclusionTags();
@@ -696,9 +856,9 @@ class App {
         if (nodesToRender.length === 0) {
             const hasActiveQuery = this.getCurrentNodeFilterQuery().length > 0;
             const hasActiveFilter = this.hasActiveNodeFilters();
-            const emptyText = this.currentSubscription
-                ? (hasActiveQuery || hasActiveFilter ? '没有匹配的节点' : '当前订阅暂无节点')
-                : '请先选择一个订阅';
+            const emptyText = this.currentGroup
+                ? (hasActiveQuery || hasActiveFilter ? '没有匹配的节点' : '当前节点组暂无节点')
+                : '请先选择一个节点组';
             this.elements.nodesContainer.innerHTML = `
                 <div class="empty-state">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -720,6 +880,8 @@ class App {
             const item = Components.nodeItem(node, isSelected, {
                 disableNodeCheckbox: node.in_proxy_pool,
                 disableTestButton: this.isNodeTesting,
+                showRemoveFromGroup: this.currentGroup?.group_type === 'custom',
+                disableRemoveFromGroup: this.isNodeTesting,
             });
             this.elements.nodesContainer.appendChild(item);
         });
@@ -1045,6 +1207,10 @@ class App {
             await this.testSingleNode(item.dataset.id);
             return;
         }
+        if (action === 'remove-from-group') {
+            await this.removeNodeFromCurrentCustomGroup(item.dataset.id);
+            return;
+        }
 
         // Don't toggle if clicking on checkbox directly
         if (e.target.closest('.node-checkbox')) return;
@@ -1127,6 +1293,20 @@ class App {
         `;
     }
 
+    updateAddToGroupButton() {
+        if (!this.elements.btnAddToGroup) return;
+        const count = this.getSelectedCopyableNodeIds().length;
+        this.elements.btnAddToGroup.disabled = this.isNodeTesting || count === 0;
+        if (this.isNodeTesting) {
+            this.elements.btnAddToGroup.title = '节点测试进行中，请稍候';
+        } else if (count === 0) {
+            this.elements.btnAddToGroup.title = '请先勾选未入池节点';
+        } else {
+            this.elements.btnAddToGroup.title = '将勾选节点复制到自定义分组';
+        }
+        this.elements.btnAddToGroup.textContent = `加入到分组${count > 0 ? ` (${count})` : ''}`;
+    }
+
     updateSelectAllButton() {
         if (!this.elements.btnSelectAll) return;
         const visibleSelectableCount = this.getNodesForCurrentView(this.getCurrentNodeFilterQuery())
@@ -1137,7 +1317,7 @@ class App {
             ? '节点测试进行中，请稍候'
             : (visibleSelectableCount > 0
                 ? '勾选当前筛选结果中的未入池节点'
-                : (this.currentSubscription ? '当前列表没有可勾选节点' : '请先选择订阅'));
+                : (this.currentGroup ? '当前列表没有可勾选节点' : '请先选择节点组'));
     }
 
     updateNodeTestButtons() {
@@ -1161,7 +1341,7 @@ class App {
             this.elements.btnTestAllNodes.disabled = totalCount === 0 || this.isNodeTesting;
             this.elements.btnTestAllNodes.title = this.isNodeTesting
                 ? '节点测试进行中，请稍候'
-                : (totalCount > 0 ? '测试当前筛选结果中的全部节点' : (this.currentSubscription ? '当前筛选结果没有节点' : '请先选择订阅'));
+                : (totalCount > 0 ? '测试当前筛选结果中的全部节点' : (this.currentGroup ? '当前筛选结果没有节点' : '请先选择节点组'));
             this.elements.btnTestAllNodes.innerHTML = `
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -1215,6 +1395,7 @@ class App {
 
     updateNodeActionButtons() {
         this.updateAddToProxyButton();
+        this.updateAddToGroupButton();
         this.updateNodeTestButtons();
         this.updateAddSuccessToProxyButton();
         this.updateSelectAllButton();
@@ -1595,6 +1776,95 @@ class App {
             Components.showToast(message, 'success');
         } catch (error) {
             Components.showToast(`添加失败: ${error.message}`, 'error');
+        }
+    }
+
+    getSelectedCopyableNodeIds() {
+        return this.nodes
+            .filter((node) => !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .map((node) => node.id);
+    }
+
+    openCopyToGroupModal() {
+        const selectedNodeIds = this.getSelectedCopyableNodeIds();
+        if (selectedNodeIds.length === 0) {
+            Components.showToast('请先勾选未入池节点', 'warning');
+            return;
+        }
+        if (!this.elements.copyGroupSelect) return;
+
+        const options = this.customGroups.map((group) =>
+            `<option value="${group.id}">${this.escapeHtml(group.name)} (${group.node_count || 0})</option>`
+        );
+        this.elements.copyGroupSelect.innerHTML = options.length > 0
+            ? options.join('')
+            : '<option value="">暂无可选分组（可直接输入新分组名称）</option>';
+        if (this.elements.copyGroupNewName) {
+            this.elements.copyGroupNewName.value = '';
+        }
+        this.elements.modalCopyToGroup?.classList.add('active');
+    }
+
+    async confirmCopyToGroup() {
+        const sourceNodeIds = this.getSelectedCopyableNodeIds();
+        if (sourceNodeIds.length === 0) {
+            Components.showToast('请先勾选节点', 'warning');
+            return;
+        }
+
+        let targetGroupId = this.elements.copyGroupSelect?.value || '';
+        const newGroupName = (this.elements.copyGroupNewName?.value || '').trim();
+        let createdGroupId = null;
+
+        try {
+            if (newGroupName) {
+                const created = await api.createCustomGroup(newGroupName);
+                targetGroupId = created.id;
+                createdGroupId = created.id;
+            }
+            if (!targetGroupId) {
+                Components.showToast('请选择目标分组或输入新分组名称', 'warning');
+                return;
+            }
+
+            const result = await api.copyNodesToCustomGroup(targetGroupId, sourceNodeIds);
+            await this.loadSubscriptions();
+            this.closeModals();
+            Components.showToast(
+                `加入分组完成: ${result.copied_count} 新增，${result.skipped_duplicates} 重复`,
+                'success'
+            );
+        } catch (error) {
+            if (createdGroupId) {
+                try {
+                    await api.deleteCustomGroup(createdGroupId);
+                } catch (cleanupError) {
+                    console.warn('Failed to rollback empty custom group after copy error:', cleanupError);
+                }
+            }
+            Components.showToast(`加入分组失败: ${error.message}`, 'error');
+        }
+    }
+
+    async removeNodeFromCurrentCustomGroup(nodeId) {
+        if (!this.currentGroup || this.currentGroup.group_type !== 'custom') {
+            return;
+        }
+        const node = this.nodes.find((item) => item.id === nodeId);
+        if (!node) return;
+        if (!confirm(`确定从分组中移除节点 "${node.name}" 吗？`)) {
+            return;
+        }
+        try {
+            await api.deleteCustomGroupNode(this.currentGroup.id, nodeId);
+            this.nodes = this.nodes.filter((item) => item.id !== nodeId);
+            this.selectedNodeIds.delete(nodeId);
+            this.renderNodeExclusionTags();
+            this.renderCurrentNodeView();
+            await this.loadSubscriptions();
+            Components.showToast('节点已移出分组', 'success');
+        } catch (error) {
+            Components.showToast(`移出失败: ${error.message}`, 'error');
         }
     }
 

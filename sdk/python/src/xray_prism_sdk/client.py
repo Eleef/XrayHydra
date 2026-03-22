@@ -119,6 +119,54 @@ class XrayPrismClient:
         json_body = None
         return self._request('GET', f'/api/subscriptions/{sub_id}/nodes', params=params, json_body=json_body, requires_auth=False)
 
+    def list_custom_groups(self) -> models.CustomGroupListResponse:
+        """List Custom Groups."""
+        params = None
+        json_body = None
+        return self._request('GET', '/api/custom-groups', params=params, json_body=json_body, requires_auth=False)
+
+    def create_custom_group(self, payload: models.CustomGroupCreateRequest) -> models.CustomGroupResponse:
+        """Create Custom Group."""
+        params = None
+        json_body = dict(payload)
+        return self._request('POST', '/api/custom-groups', params=params, json_body=json_body, requires_auth=False)
+
+    def rename_custom_group(self, group_id: str, payload: models.CustomGroupRenameRequest) -> models.CustomGroupResponse:
+        """Rename Custom Group."""
+        params = None
+        json_body = dict(payload)
+        return self._request('PATCH', f'/api/custom-groups/{group_id}', params=params, json_body=json_body, requires_auth=False)
+
+    def delete_custom_group(self, group_id: str) -> models.SuccessResponse:
+        """Delete Custom Group."""
+        params = None
+        json_body = None
+        return self._request('DELETE', f'/api/custom-groups/{group_id}', params=params, json_body=json_body, requires_auth=False)
+
+    def list_custom_group_nodes(self, group_id: str) -> models.NodeListResponse:
+        """List Custom Group Nodes."""
+        params = None
+        json_body = None
+        return self._request('GET', f'/api/custom-groups/{group_id}/nodes', params=params, json_body=json_body, requires_auth=False)
+
+    def import_custom_group_nodes(self, group_id: str, payload: models.CustomGroupImportRequest) -> models.CustomGroupImportResponse:
+        """Import Custom Group Nodes."""
+        params = None
+        json_body = dict(payload)
+        return self._request('POST', f'/api/custom-groups/{group_id}/nodes/import', params=params, json_body=json_body, requires_auth=False)
+
+    def copy_nodes_to_custom_group(self, group_id: str, payload: models.CustomGroupCopyNodesRequest) -> models.CustomGroupCopyNodesResponse:
+        """Copy Nodes To Custom Group."""
+        params = None
+        json_body = dict(payload)
+        return self._request('POST', f'/api/custom-groups/{group_id}/nodes/copy', params=params, json_body=json_body, requires_auth=False)
+
+    def delete_custom_group_node(self, group_id: str, node_id: str) -> models.SuccessResponse:
+        """Delete Custom Group Node."""
+        params = None
+        json_body = None
+        return self._request('DELETE', f'/api/custom-groups/{group_id}/nodes/{node_id}', params=params, json_body=json_body, requires_auth=False)
+
     def get_node(self, node_id: str) -> models.NodeResponse:
         """Get Node."""
         # Get a single node by ID.

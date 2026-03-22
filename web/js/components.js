@@ -5,38 +5,56 @@
 
 const Components = {
     /**
-     * Create a subscription item element
-     * @param {object} subscription - Subscription data
-     * @param {boolean} isActive - Whether this subscription is selected
+     * Create a group item element
+     * @param {object} group - Group data
+     * @param {boolean} isActive - Whether this group is selected
      * @returns {HTMLElement}
      */
-    subscriptionItem(subscription, isActive = false) {
+    groupItem(group, isActive = false) {
         const div = document.createElement('div');
         div.className = `subscription-item${isActive ? ' active' : ''}`;
-        div.dataset.id = subscription.id;
+        div.dataset.id = group.id;
+        const groupType = group.group_type || 'subscription';
+        div.dataset.groupType = groupType;
 
-        const lastUpdated = subscription.last_updated
-            ? new Date(subscription.last_updated).toLocaleDateString('zh-CN')
+        const updatedAt = groupType === 'custom'
+            ? (group.updated_at || group.created_at)
+            : group.last_updated;
+        const lastUpdated = updatedAt
+            ? new Date(updatedAt).toLocaleDateString('zh-CN')
             : '未更新';
+        const groupTypeLabel = groupType === 'custom' ? '自定义' : '订阅';
+        const showRefresh = groupType === 'subscription';
+        const showRename = groupType === 'custom';
+        const deleteTitle = groupType === 'custom' ? '删除分组' : '删除订阅';
 
         div.innerHTML = `
             <div class="subscription-info">
-                <span class="subscription-name">${this.escapeHtml(subscription.name)}</span>
+                <span class="subscription-name">
+                    ${this.escapeHtml(group.name)}
+                    <span class="group-type-badge ${groupType === 'custom' ? 'custom' : 'subscription'}">${groupTypeLabel}</span>
+                </span>
                 <div class="subscription-meta">
-                    <span>${subscription.node_count} 节点</span>
+                    <span>${group.node_count} 节点</span>
                     <span>•</span>
                     <span>${lastUpdated}</span>
                 </div>
             </div>
             <div class="subscription-actions">
-                <button class="btn btn-icon btn-sm" data-action="refresh" title="刷新">
+                <button class="btn btn-icon btn-sm" data-action="refresh" title="刷新" ${showRefresh ? '' : 'style="display:none"'}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M23 4v6h-6"></path>
                         <path d="M1 20v-6h6"></path>
                         <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                     </svg>
                 </button>
-                <button class="btn btn-icon btn-sm" data-action="delete" title="删除">
+                <button class="btn btn-icon btn-sm" data-action="rename" title="重命名" ${showRename ? '' : 'style="display:none"'}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                    </svg>
+                </button>
+                <button class="btn btn-icon btn-sm" data-action="delete" title="${deleteTitle}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="3 6 5 6 21 6"></polyline>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -60,6 +78,8 @@ const Components = {
         const inProxyPool = Boolean(node.in_proxy_pool);
         const disableNodeCheckbox = Boolean(options.disableNodeCheckbox || inProxyPool);
         const disableTestButton = Boolean(options.disableTestButton);
+        const showRemoveFromGroup = Boolean(options.showRemoveFromGroup);
+        const disableRemoveFromGroup = Boolean(options.disableRemoveFromGroup);
         div.className = `node-item${isSelected ? ' selected' : ''}${inProxyPool ? ' in-proxy-pool' : ''}`;
         div.dataset.id = node.id;
 
@@ -92,10 +112,28 @@ const Components = {
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
                     </svg>
                 </button>
+                ${showRemoveFromGroup ? `
+                <button class="btn btn-icon btn-sm node-remove-btn" data-node-action="remove-from-group" title="移出分组" ${disableRemoveFromGroup ? 'disabled' : ''}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+                ` : ''}
             </div>
         `;
 
         return div;
+    },
+
+    /**
+     * Backward compatible alias for legacy callsites
+     * @param {object} subscription
+     * @param {boolean} isActive
+     * @returns {HTMLElement}
+     */
+    subscriptionItem(subscription, isActive = false) {
+        return this.groupItem(subscription, isActive);
     },
 
     /**

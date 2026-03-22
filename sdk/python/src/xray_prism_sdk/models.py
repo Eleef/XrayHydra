@@ -29,6 +29,49 @@ class CooldownInfo(TypedDict):
     set_at: str
     source: Literal['manual', 'timed']
 
+class CustomGroupCopyNodesRequest(TypedDict):
+    """Request model for copying existing nodes into a custom group."""
+    source_node_ids: list[str]
+
+class CustomGroupCopyNodesResponse(TypedDict):
+    """Response model for copying nodes into a custom group."""
+    copied_count: int
+    skipped_duplicates: int
+    total_requested: int
+    missing_node_ids: NotRequired[list[str]]
+
+class CustomGroupCreateRequest(TypedDict):
+    """Request model for creating a custom node group."""
+    name: str
+
+class CustomGroupImportRequest(TypedDict):
+    """Request model for importing nodes into a custom node group."""
+    content: str
+
+class CustomGroupImportResponse(TypedDict):
+    """Response model for importing nodes into a custom group."""
+    imported_count: int
+    skipped_duplicates: int
+    total_parsed: int
+
+class CustomGroupListResponse(TypedDict):
+    """Response model for custom node group list."""
+    groups: list[CustomGroupResponse]
+    total: int
+
+class CustomGroupRenameRequest(TypedDict):
+    """Request model for renaming a custom node group."""
+    name: str
+
+class CustomGroupResponse(TypedDict):
+    """Response model for custom node group metadata."""
+    id: str
+    name: str
+    group_type: NotRequired[GroupType]
+    node_count: NotRequired[int]
+    created_at: str
+    updated_at: str
+
 class HealthConfigResponse(TypedDict):
     """Response model for health monitoring config."""
     enabled: bool
@@ -140,7 +183,9 @@ class NodeListResponse(TypedDict):
 class NodeResponse(TypedDict):
     """Response model for node data."""
     id: str
-    subscription_id: str
+    group_id: str
+    group_type: GroupType
+    subscription_id: NotRequired[str | None]
     name: str
     protocol: ProtocolType
     address: str

@@ -20,9 +20,12 @@ router = APIRouter(prefix="/api/subscriptions", tags=["Subscriptions"])
 
 def _build_node_response(node: dict, proxy_port_by_node_id: dict[str, int]) -> NodeResponse:
     proxy_port = proxy_port_by_node_id.get(str(node["id"]))
+    subscription_id = str(node["subscription_id"])
     return NodeResponse(
         id=node["id"],
-        subscription_id=node["subscription_id"],
+        group_id=subscription_id,
+        group_type="subscription",
+        subscription_id=subscription_id,
         name=node["name"],
         protocol=node["protocol"],
         address=node["address"],

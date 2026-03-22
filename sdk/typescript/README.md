@@ -49,8 +49,12 @@ await client.recall_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 1002
 - `add_proxies()`
 - `apply_timed_lease_cooldown_batch()`
 - `clear_all_proxies()`
+- `copy_nodes_to_custom_group()`
+- `create_custom_group()`
 - `create_subscription()`
 - `dedupe_proxies_by_exit_ip()`
+- `delete_custom_group()`
+- `delete_custom_group_node()`
 - `delete_subscription()`
 - `get_health_config()`
 - `get_health_status()`
@@ -61,6 +65,9 @@ await client.recall_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 1002
 - `get_proxy_health_status()`
 - `get_subscription()`
 - `get_system_status()`
+- `import_custom_group_nodes()`
+- `list_custom_group_nodes()`
+- `list_custom_groups()`
 - `list_proxies()`
 - `list_subscription_nodes()`
 - `list_subscriptions()`
@@ -69,6 +76,7 @@ await client.recall_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 1002
 - `refresh_subscription()`
 - `release_lease()`
 - `remove_proxy()`
+- `rename_custom_group()`
 - `reset_all_health()`
 - `reset_proxy_health()`
 - `reset_workspace_lease_state()`

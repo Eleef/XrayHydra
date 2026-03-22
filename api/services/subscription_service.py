@@ -221,8 +221,12 @@ class SubscriptionService:
                 "allow_insecure": node.allow_insecure,
                 "ws_path": node.path,  # ProxyNode uses 'path'
                 "ws_host": node.host,  # ProxyNode uses 'host'
+                "alter_id": node.alter_id,
+                "flow": node.flow,
                 "grpc_service_name": node.service_name,  # ProxyNode uses 'service_name'
                 "fingerprint": node.fingerprint,
+                "public_key": node.public_key,
+                "short_id": node.short_id,
                 "test_status": "pending",
                 "latency_ms": None,
                 "exit_ip": None,

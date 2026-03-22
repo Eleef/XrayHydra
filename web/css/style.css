@@ -257,9 +257,33 @@ body {
     font-weight: 600;
     font-size: 0.875rem;
     color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.group-type-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 0.625rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.group-type-badge.subscription {
+    background: rgba(37, 99, 235, 0.12);
+    color: #1d4ed8;
+    border-color: rgba(37, 99, 235, 0.3);
+}
+
+.group-type-badge.custom {
+    background: rgba(14, 116, 144, 0.12);
+    color: #0f766e;
+    border-color: rgba(14, 116, 144, 0.3);
 }
 
 .subscription-meta {
@@ -1439,6 +1463,12 @@ body {
     gap: var(--spacing-md);
 }
 
+.group-entry-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-sm);
+}
+
 .modal-footer {
     display: flex;
     justify-content: flex-end;
@@ -1477,6 +1507,28 @@ body {
 }
 
 .form-group input::placeholder {
+    color: var(--text-muted);
+}
+
+.form-group textarea {
+    min-height: 120px;
+    resize: vertical;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    transition: all var(--transition-fast);
+}
+
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.form-group textarea::placeholder {
     color: var(--text-muted);
 }
 

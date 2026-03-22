@@ -50,6 +50,22 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("testNodes", operation_ids)
         self.assertIn("startNodeTestJob", operation_ids)
         self.assertIn("getNodeTestJob", operation_ids)
+        self.assertIn("listCustomGroups", operation_ids)
+        self.assertIn("createCustomGroup", operation_ids)
+        self.assertIn("renameCustomGroup", operation_ids)
+        self.assertIn("deleteCustomGroup", operation_ids)
+        self.assertIn("listCustomGroupNodes", operation_ids)
+        self.assertIn("importCustomGroupNodes", operation_ids)
+        self.assertIn("copyNodesToCustomGroup", operation_ids)
+        self.assertIn("deleteCustomGroupNode", operation_ids)
+        self.assertIn("listCustomGroups", operation_ids)
+        self.assertIn("createCustomGroup", operation_ids)
+        self.assertIn("renameCustomGroup", operation_ids)
+        self.assertIn("deleteCustomGroup", operation_ids)
+        self.assertIn("listCustomGroupNodes", operation_ids)
+        self.assertIn("importCustomGroupNodes", operation_ids)
+        self.assertIn("copyNodesToCustomGroup", operation_ids)
+        self.assertIn("deleteCustomGroupNode", operation_ids)
 
     def test_openapi_includes_request_examples(self):
         """Request schemas should carry examples for API consumers."""
@@ -132,8 +148,14 @@ class TestOpenAPIContract(unittest.TestCase):
         schemas = spec["components"]["schemas"]
 
         node_props = schemas["NodeResponse"]["properties"]
+        self.assertIn("group_id", node_props)
+        self.assertIn("group_type", node_props)
         self.assertIn("in_proxy_pool", node_props)
         self.assertIn("proxy_port", node_props)
+        self.assertIn("subscription_id", node_props)
+        self.assertIn("group_id", node_props)
+        self.assertIn("group_type", node_props)
+        self.assertIn("subscription_id", node_props)
 
         self.assertIn("/api/nodes/test", spec["paths"])
         test_operation = spec["paths"]["/api/nodes/test"]["post"]
@@ -179,6 +201,16 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("progress_percent", job_props)
         self.assertIn("current_target_completed", job_props)
         self.assertIn("current_target_total", job_props)
+
+        self.assertIn("/api/custom-groups", spec["paths"])
+        self.assertIn("/api/custom-groups/{group_id}/nodes", spec["paths"])
+        self.assertIn("/api/custom-groups/{group_id}/nodes/import", spec["paths"])
+        self.assertIn("/api/custom-groups/{group_id}/nodes/copy", spec["paths"])
+        self.assertIn("/api/custom-groups/{group_id}/nodes/{node_id}", spec["paths"])
+
+        self.assertIn("/api/custom-groups", spec["paths"])
+        self.assertIn("/api/custom-groups/{group_id}/nodes/import", spec["paths"])
+        self.assertIn("/api/custom-groups/{group_id}/nodes/copy", spec["paths"])
 
 
 if __name__ == "__main__":

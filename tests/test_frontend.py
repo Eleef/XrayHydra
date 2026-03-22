@@ -20,9 +20,11 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn("text/html", response.headers["content-type"])
         body = response.text
         self.assertIn('id="btn-add-to-proxy"', body)
+        self.assertIn('id="btn-add-to-group"', body)
         self.assertIn("测试选中", body)
         self.assertIn("测试全部", body)
         self.assertIn('id="btn-dedupe-exit-ip"', body)
+        self.assertIn("节点组", body)
 
     def test_favicon_request_does_not_404(self):
         response = self.client.get("/favicon.ico")
@@ -35,6 +37,9 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn("排除关键词", body)
         self.assertIn('id="node-exclusion-input"', body)
         self.assertIn('id="modal-exit-ip-dedupe-review"', body)
+        self.assertIn('id="modal-create-group-entry"', body)
+        self.assertIn('id="modal-add-custom-group"', body)
+        self.assertIn('id="modal-copy-to-group"', body)
 
     def test_docs_track_keyword_counts_and_progress(self):
         with open("docs/product/frontend_spec.md", encoding="utf-8") as spec:
@@ -45,12 +50,16 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn("/api/nodes/test-jobs", spec_text)
         self.assertIn("progress_percent", spec_text)
         self.assertIn("去重禁用", spec_text)
+        self.assertIn("加入到分组", spec_text)
+        self.assertIn("自定义组", spec_text)
         with open("docs/guide/development.md", encoding="utf-8") as guide:
             guide_text = guide.read()
         self.assertIn("排除关键词标签后会显示", guide_text)
         self.assertIn("节点测试进度条", guide_text)
         self.assertIn("/api/nodes/test-jobs/{job_id}", guide_text)
         self.assertIn("去重禁用", guide_text)
+        self.assertIn("节点组", guide_text)
+        self.assertIn("加入到分组", guide_text)
 
     def test_docs_describe_progress_polling_fields(self):
         with open("docs/product/frontend_spec.md", encoding="utf-8") as spec:

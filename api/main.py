@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 
-from api.routes import subscriptions, proxies, system, nodes, health, lease
+from api.routes import subscriptions, proxies, system, nodes, health, lease, custom_groups
 
 # Create FastAPI app
 app = FastAPI(
@@ -26,6 +26,7 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_tags=[
         {"name": "Subscriptions", "description": "Manage subscription sources and parsed nodes."},
+        {"name": "Custom Groups", "description": "Manage user-defined node groups and snapshot nodes."},
         {"name": "Nodes", "description": "Inspect individual proxy nodes parsed from subscriptions."},
         {"name": "Proxies", "description": "Manage local proxy port mappings and runtime tests."},
         {"name": "Health", "description": "Inspect and control background health monitoring."},
@@ -45,6 +46,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(subscriptions.router)
+app.include_router(custom_groups.router)
 app.include_router(nodes.router)
 app.include_router(proxies.router)
 app.include_router(system.router)

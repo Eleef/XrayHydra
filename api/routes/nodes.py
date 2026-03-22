@@ -10,6 +10,7 @@ from api.schemas.models import (
     NodeResponse,
     ErrorResponse,
 )
+from api.services.custom_group_service import get_custom_group_service
 from api.services.node_test_service import get_node_test_service
 from api.services.proxy_service import get_proxy_service
 from api.services.subscription_service import get_subscription_service
@@ -27,9 +28,19 @@ def _proxy_port_by_node_id() -> dict[str, int]:
 
 def _build_node_response(node: dict, proxy_port_map: dict[str, int]) -> NodeResponse:
     proxy_port = proxy_port_map.get(str(node["id"]))
+    subscription_id_raw = node.get("subscription_id")
+    subscription_id = str(subscription_id_raw) if subscription_id_raw else None
+    if subscription_id:
+        group_id = str(subscription_id)
+        group_type = "subscription"
+    else:
+        group_id = str(node.get("group_id") or "")
+        group_type = "custom"
     return NodeResponse(
         id=node["id"],
-        subscription_id=node["subscription_id"],
+        group_id=group_id,
+        group_type=group_type,
+        subscription_id=subscription_id,
         name=node["name"],
         protocol=node["protocol"],
         address=node["address"],
@@ -51,8 +62,10 @@ def _build_node_response(node: dict, proxy_port_map: dict[str, int]) -> NodeResp
 )
 async def get_node(node_id: str):
     """Get a single node by ID."""
-    service = get_subscription_service()
-    node = service.get_node(node_id)
+    subscription_service = get_subscription_service()
+    node = subscription_service.get_node(node_id)
+    if not node:
+        node = get_custom_group_service().get_node(node_id)
     
     if not node:
         raise HTTPException(

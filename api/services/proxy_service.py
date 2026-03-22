@@ -24,6 +24,7 @@ from src.xray_prism.runner import XrayRunner
 from src.xray_prism.tester import ProxyTester
 
 from api.services.subscription_service import get_subscription_service
+from api.services.custom_group_service import get_custom_group_service
 
 logger = logging.getLogger(__name__)
 
@@ -264,10 +265,14 @@ class ProxyService:
     def add_proxies(self, node_ids: List[str], start_port: int = 10000) -> List[Dict]:
         """Add nodes to the active proxy list."""
         self._load_data()
-        
-        subscription_service = get_subscription_service()
-        nodes_data = subscription_service.get_nodes_by_ids(node_ids)
-        
+
+        requested_ids = list(dict.fromkeys(node_ids))
+        subscription_nodes = get_subscription_service().get_nodes_by_ids(requested_ids)
+        custom_nodes = get_custom_group_service().get_nodes_by_ids(requested_ids)
+        node_map = {node["id"]: node for node in subscription_nodes}
+        node_map.update({node["id"]: node for node in custom_nodes})
+        nodes_data = [node_map[node_id] for node_id in requested_ids if node_id in node_map]
+
         if not nodes_data:
             raise ValueError("No valid nodes found")
 
@@ -355,13 +360,14 @@ class ProxyService:
     def _build_proxy_nodes(self) -> List[ProxyNode]:
         """Build ProxyNode objects from active proxies."""
         self._load_data()
-        subscription_service = get_subscription_service()
         
         proxy_nodes = []
         for proxy in self._data.get("proxies", []):
             if not self.is_proxy_enabled(proxy):
                 continue
-            node_data = subscription_service.get_node(proxy["node_id"])
+            node_data = get_subscription_service().get_node(proxy["node_id"])
+            if not node_data:
+                node_data = get_custom_group_service().get_node(proxy["node_id"])
             if not node_data:
                 continue
             
@@ -382,6 +388,10 @@ class ProxyService:
                 host=node_data.get("ws_host"),  # ws_host -> host
                 service_name=node_data.get("grpc_service_name"),  # grpc_service_name -> service_name
                 fingerprint=node_data.get("fingerprint"),
+                alter_id=int(node_data.get("alter_id", 0)),
+                flow=node_data.get("flow"),
+                public_key=node_data.get("public_key"),
+                short_id=node_data.get("short_id"),
             )
             # Store local port for mapping
             proxy_node._local_port = proxy["port"]

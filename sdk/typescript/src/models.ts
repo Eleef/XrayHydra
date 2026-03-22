@@ -25,6 +25,49 @@ export interface CooldownInfo {
   source: "manual" | "timed";
 }
 
+export interface CustomGroupCopyNodesRequest {
+  source_node_ids: Array<string>;
+}
+
+export interface CustomGroupCopyNodesResponse {
+  copied_count: number;
+  skipped_duplicates: number;
+  total_requested: number;
+  missing_node_ids?: Array<string>;
+}
+
+export interface CustomGroupCreateRequest {
+  name: string;
+}
+
+export interface CustomGroupImportRequest {
+  content: string;
+}
+
+export interface CustomGroupImportResponse {
+  imported_count: number;
+  skipped_duplicates: number;
+  total_parsed: number;
+}
+
+export interface CustomGroupListResponse {
+  groups: Array<CustomGroupResponse>;
+  total: number;
+}
+
+export interface CustomGroupRenameRequest {
+  name: string;
+}
+
+export interface CustomGroupResponse {
+  id: string;
+  name: string;
+  group_type?: GroupType;
+  node_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface HealthConfigResponse {
   enabled: boolean;
   check_interval_seconds: number;
@@ -135,7 +178,9 @@ export interface NodeListResponse {
 
 export interface NodeResponse {
   id: string;
-  subscription_id: string;
+  group_id: string;
+  group_type: GroupType;
+  subscription_id?: string | unknown;
   name: string;
   protocol: ProtocolType;
   address: string;

@@ -91,6 +91,99 @@ class ApiClient {
         return this.request(`/subscriptions/${subId}/nodes`);
     }
 
+    // ==================== Custom Groups ====================
+
+    /**
+     * Get all custom groups
+     * @returns {Promise<{groups: Array, total: number}>}
+     */
+    async getCustomGroups() {
+        return this.request('/custom-groups');
+    }
+
+    /**
+     * Create a custom group
+     * @param {string} name - Group name
+     * @returns {Promise<object>}
+     */
+    async createCustomGroup(name) {
+        return this.request('/custom-groups', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+        });
+    }
+
+    /**
+     * Rename a custom group
+     * @param {string} groupId - Group ID
+     * @param {string} name - New group name
+     * @returns {Promise<object>}
+     */
+    async renameCustomGroup(groupId, name) {
+        return this.request(`/custom-groups/${groupId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name }),
+        });
+    }
+
+    /**
+     * Delete a custom group
+     * @param {string} groupId - Group ID
+     * @returns {Promise<object>}
+     */
+    async deleteCustomGroup(groupId) {
+        return this.request(`/custom-groups/${groupId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    /**
+     * Get nodes for a custom group
+     * @param {string} groupId - Group ID
+     * @returns {Promise<{nodes: Array, total: number}>}
+     */
+    async getCustomGroupNodes(groupId) {
+        return this.request(`/custom-groups/${groupId}/nodes`);
+    }
+
+    /**
+     * Import pasted nodes into a custom group
+     * @param {string} groupId - Group ID
+     * @param {string} content - Multi-line node content
+     * @returns {Promise<object>}
+     */
+    async importCustomGroupNodes(groupId, content) {
+        return this.request(`/custom-groups/${groupId}/nodes/import`, {
+            method: 'POST',
+            body: JSON.stringify({ content }),
+        });
+    }
+
+    /**
+     * Copy node snapshots into a custom group
+     * @param {string} groupId - Group ID
+     * @param {string[]} sourceNodeIds - Source node IDs
+     * @returns {Promise<object>}
+     */
+    async copyNodesToCustomGroup(groupId, sourceNodeIds) {
+        return this.request(`/custom-groups/${groupId}/nodes/copy`, {
+            method: 'POST',
+            body: JSON.stringify({ source_node_ids: sourceNodeIds }),
+        });
+    }
+
+    /**
+     * Delete one node from a custom group
+     * @param {string} groupId - Group ID
+     * @param {string} nodeId - Node ID
+     * @returns {Promise<object>}
+     */
+    async deleteCustomGroupNode(groupId, nodeId) {
+        return this.request(`/custom-groups/${groupId}/nodes/${nodeId}`, {
+            method: 'DELETE',
+        });
+    }
+
     // ==================== Nodes ====================
 
     /**

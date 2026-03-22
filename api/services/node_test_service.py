@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from api.services.proxy_service import get_proxy_service
+from api.services.custom_group_service import get_custom_group_service
 from api.services.subscription_service import get_subscription_service
 from src.xray_prism.generator import ConfigGenerator
 from src.xray_prism.models import (
@@ -65,9 +66,43 @@ class NodeTestService:
 
     def __init__(self) -> None:
         self._subscription_service = get_subscription_service()
+        self._custom_group_service = get_custom_group_service()
         self._proxy_service = get_proxy_service()
         self._jobs: Dict[str, NodeTestJob] = {}
         self._jobs_lock = threading.Lock()
+
+    def _get_nodes_by_ids(self, node_ids: List[str]) -> List[Dict]:
+        subscription_nodes = self._subscription_service.get_nodes_by_ids(node_ids)
+        custom_nodes = self._custom_group_service.get_nodes_by_ids(node_ids)
+        node_map = {node["id"]: node for node in subscription_nodes}
+        node_map.update({node["id"]: node for node in custom_nodes})
+        return [node_map[node_id] for node_id in node_ids if node_id in node_map]
+
+    def _update_node_test_result(
+        self,
+        *,
+        node_id: str,
+        status: str,
+        latency_ms: Optional[int] = None,
+        exit_ip: Optional[str] = None,
+        exit_country: Optional[str] = None,
+    ) -> None:
+        if self._subscription_service.get_node(node_id):
+            self._subscription_service.update_node_test_result(
+                node_id=node_id,
+                status=status,
+                latency_ms=latency_ms,
+                exit_ip=exit_ip,
+                exit_country=exit_country,
+            )
+            return
+        self._custom_group_service.update_node_test_result(
+            node_id=node_id,
+            status=status,
+            latency_ms=latency_ms,
+            exit_ip=exit_ip,
+            exit_country=exit_country,
+        )
 
     def _snapshot_job(self, job: NodeTestJob) -> Dict[str, object]:
         return {
@@ -477,7 +512,7 @@ class NodeTestService:
             raise ValueError("node_ids cannot be empty")
 
         requested_ids = list(dict.fromkeys(node_ids))
-        nodes = self._subscription_service.get_nodes_by_ids(requested_ids)
+        nodes = self._get_nodes_by_ids(requested_ids)
         node_by_id = {node["id"]: node for node in nodes}
 
         missing_ids = [node_id for node_id in requested_ids if node_id not in node_by_id]
@@ -525,7 +560,7 @@ class NodeTestService:
                         )
                     )
                     if node_id in node_by_id:
-                        self._subscription_service.update_node_test_result(
+                        self._update_node_test_result(
                             node_id=node_id,
                             status="failed",
                             latency_ms=None,
@@ -628,7 +663,7 @@ class NodeTestService:
                         tested_target=None,
                     )
                 )
-                self._subscription_service.update_node_test_result(
+                self._update_node_test_result(
                     node_id=node_id,
                     status="failed",
                     latency_ms=None,
@@ -639,7 +674,7 @@ class NodeTestService:
 
             item = run_results[node_id]
             ordered_results.append(item)
-            self._subscription_service.update_node_test_result(
+            self._update_node_test_result(
                 node_id=node_id,
                 status=str(item["status"]),
                 latency_ms=item.get("latency_ms"),
