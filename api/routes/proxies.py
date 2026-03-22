@@ -9,6 +9,11 @@ from api.schemas.models import (
     ProxyResponse,
     ProxyListResponse,
     ProxyTestAllResponse,
+    ProxyExitIpDedupeRequest,
+    ProxyExitIpDedupeResponse,
+    ProxyExitIpDuplicatePreviewResponse,
+    ProxyExitIpDuplicateGroup,
+    ProxyExitIpDuplicateProxy,
     NodeTestResult,
     SuccessResponse,
     ErrorResponse,
@@ -36,7 +41,9 @@ async def get_proxies():
             "server_port": p["server_port"],
             "test_status": p.get("test_status", "pending"),
             "latency_ms": p.get("latency_ms"),
-            "exit_ip": p.get("exit_ip")
+            "exit_ip": p.get("exit_ip"),
+            "pool_status": p.get("pool_status", "active"),
+            "disabled_reason": p.get("disabled_reason"),
         }) for p in proxies],
         total=len(proxies),
         xray_status=xray_status
@@ -70,7 +77,9 @@ async def add_proxies(data: ProxyAddRequest):
             "protocol": p["protocol"],
             "address": p["address"],
             "server_port": p["server_port"],
-            "test_status": p.get("test_status", "pending")
+            "test_status": p.get("test_status", "pending"),
+            "pool_status": p.get("pool_status", "active"),
+            "disabled_reason": p.get("disabled_reason"),
         }) for p in new_proxies]
     except ValueError as e:
         raise HTTPException(
@@ -106,33 +115,81 @@ async def clear_all_proxies():
     return SuccessResponse(message=f"Removed {count} proxies")
 
 
+@router.get(
+    "/duplicates/exit-ip",
+    response_model=ProxyExitIpDuplicatePreviewResponse,
+    operation_id="previewProxyExitIpDuplicates"
+)
+async def preview_proxy_exit_ip_duplicates():
+    """Preview duplicate active proxies that currently share the same exit IP."""
+    service = get_proxy_service()
+    groups = service.get_exit_ip_duplicate_groups()
+    duplicate_proxy_count = sum(len(group["remove_proxies"]) for group in groups)
+    return ProxyExitIpDuplicatePreviewResponse(
+        groups=[
+            ProxyExitIpDuplicateGroup(
+                exit_ip=group["exit_ip"],
+                keep_proxy=ProxyExitIpDuplicateProxy(**group["keep_proxy"]),
+                remove_proxies=[ProxyExitIpDuplicateProxy(**item) for item in group["remove_proxies"]],
+            )
+            for group in groups
+        ],
+        duplicate_group_count=len(groups),
+        duplicate_proxy_count=duplicate_proxy_count,
+    )
+
+
+@router.post(
+    "/dedupe/exit-ip",
+    response_model=ProxyExitIpDedupeResponse,
+    responses={400: {"model": ErrorResponse, "description": "Invalid duplicate selection"}},
+    operation_id="dedupeProxiesByExitIp"
+)
+async def dedupe_proxies_by_exit_ip(data: ProxyExitIpDedupeRequest):
+    """Disable duplicate active proxies after user confirmation."""
+    service = get_proxy_service()
+    try:
+        result = service.dedupe_proxies_by_exit_ip(data.disable_ports)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    return ProxyExitIpDedupeResponse(
+        disabled_count=result["disabled_count"],
+        disabled_ports=result["disabled_ports"],
+        kept_ports=result["kept_ports"],
+    )
+
+
 @router.post(
     "/test-all",
     response_model=ProxyTestAllResponse,
     responses={400: {"model": ErrorResponse, "description": "Xray is not running"}},
     operation_id="testAllProxies"
 )
-async def test_all_proxies(timeout: int = 5, workers: int = 20):
+async def test_all_proxies(timeout: int = 5, workers: int = 20, attempts: int = 1):
     """Test all active proxies."""
     service = get_proxy_service()
     
     try:
-        results = service.test_all_proxies(timeout=timeout, workers=workers)
-        
-        success_count = sum(1 for r in results if r.get("status") == "success")
-        failed_count = len(results) - success_count
+        result = service.test_all_proxies(timeout=timeout, workers=workers, attempts=attempts)
         
         return ProxyTestAllResponse(
             results=[NodeTestResult(
                 node_id=r["node_id"],
                 name=r["name"],
+                proxy_port=r.get("port"),
                 status=r["status"],
                 latency_ms=r.get("latency_ms"),
                 exit_ip=r.get("exit_ip"),
                 error=r.get("error")
-            ) for r in results],
-            success_count=success_count,
-            failed_count=failed_count
+            ) for r in result["results"]],
+            success_count=result["success_count"],
+            failed_count=result["failed_count"],
+            attempts=result["attempts"],
+            cooldown_candidates=result["cooldown_candidates"],
         )
     except RuntimeError as e:
         raise HTTPException(
@@ -170,7 +227,7 @@ async def test_single_proxy(port: int, timeout: int = 5):
             exit_ip=result.get("exit_ip"),
             error=result.get("error")
         )
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)

@@ -63,131 +63,159 @@ export class XrayPrismClient {
     return payload;
   }
 
-  async list_subscriptions() {
+  async list_subscriptions(): Promise<models.SubscriptionListResponse> {
     return this.request('GET', `/api/subscriptions`, undefined, undefined, false);
   }
 
-  async create_subscription(payload: models.SubscriptionCreate) {
+  async create_subscription(payload: models.SubscriptionCreate): Promise<models.SubscriptionResponse> {
     return this.request('POST', `/api/subscriptions`, undefined, payload, false);
   }
 
-  async get_subscription(sub_id: string) {
+  async get_subscription(sub_id: string): Promise<models.SubscriptionResponse> {
     return this.request('GET', `/api/subscriptions/${sub_id}`, undefined, undefined, false);
   }
 
-  async delete_subscription(sub_id: string) {
+  async delete_subscription(sub_id: string): Promise<models.SuccessResponse> {
     return this.request('DELETE', `/api/subscriptions/${sub_id}`, undefined, undefined, false);
   }
 
-  async refresh_subscription(sub_id: string) {
+  async refresh_subscription(sub_id: string): Promise<models.SubscriptionResponse> {
     return this.request('POST', `/api/subscriptions/${sub_id}/refresh`, undefined, undefined, false);
   }
 
-  async list_subscription_nodes(sub_id: string) {
+  async list_subscription_nodes(sub_id: string): Promise<models.NodeListResponse> {
     return this.request('GET', `/api/subscriptions/${sub_id}/nodes`, undefined, undefined, false);
   }
 
-  async get_node(node_id: string) {
+  async get_node(node_id: string): Promise<models.NodeResponse> {
     return this.request('GET', `/api/nodes/${node_id}`, undefined, undefined, false);
   }
 
-  async list_proxies() {
+  async test_nodes(payload: models.NodeTestRequest): Promise<models.NodeBatchTestResponse> {
+    return this.request('POST', `/api/nodes/test`, undefined, payload, false);
+  }
+
+  async start_node_test_job(payload: models.NodeTestRequest): Promise<models.NodeTestJobResponse> {
+    return this.request('POST', `/api/nodes/test-jobs`, undefined, payload, false);
+  }
+
+  async get_node_test_job(job_id: string): Promise<models.NodeTestJobResponse> {
+    return this.request('GET', `/api/nodes/test-jobs/${job_id}`, undefined, undefined, false);
+  }
+
+  async list_proxies(): Promise<models.ProxyListResponse> {
     return this.request('GET', `/api/proxies`, undefined, undefined, false);
   }
 
-  async add_proxies(payload: models.ProxyAddRequest) {
+  async add_proxies(payload: models.ProxyAddRequest): Promise<Array<models.ProxyResponse>> {
     return this.request('POST', `/api/proxies`, undefined, payload, false);
   }
 
-  async clear_all_proxies() {
+  async clear_all_proxies(): Promise<models.SuccessResponse> {
     return this.request('DELETE', `/api/proxies`, undefined, undefined, false);
   }
 
-  async remove_proxy(port: number) {
+  async remove_proxy(port: number): Promise<models.SuccessResponse> {
     return this.request('DELETE', `/api/proxies/${port}`, undefined, undefined, false);
   }
 
-  async test_all_proxies(query: { timeout?: number; workers?: number } = {}) {
+  async preview_proxy_exit_ip_duplicates(): Promise<models.ProxyExitIpDuplicatePreviewResponse> {
+    return this.request('GET', `/api/proxies/duplicates/exit-ip`, undefined, undefined, false);
+  }
+
+  async dedupe_proxies_by_exit_ip(payload: models.ProxyExitIpDedupeRequest): Promise<models.ProxyExitIpDedupeResponse> {
+    return this.request('POST', `/api/proxies/dedupe/exit-ip`, undefined, payload, false);
+  }
+
+  async test_all_proxies(query: { timeout?: number; workers?: number; attempts?: number } = {}): Promise<models.ProxyTestAllResponse> {
     return this.request('POST', `/api/proxies/test-all`, Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null)), undefined, false);
   }
 
-  async test_single_proxy(port: number, query: { timeout?: number } = {}) {
+  async test_single_proxy(port: number, query: { timeout?: number } = {}): Promise<models.NodeTestResult> {
     return this.request('POST', `/api/proxies/${port}/test`, Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null)), undefined, false);
   }
 
-  async get_system_status() {
+  async get_system_status(): Promise<models.SystemStatusResponse> {
     return this.request('GET', `/api/system/status`, undefined, undefined, false);
   }
 
-  async start_xray() {
+  async start_xray(): Promise<models.SystemActionResponse> {
     return this.request('POST', `/api/system/start`, undefined, undefined, false);
   }
 
-  async stop_xray() {
+  async stop_xray(): Promise<models.SystemActionResponse> {
     return this.request('POST', `/api/system/stop`, undefined, undefined, false);
   }
 
-  async restart_xray() {
+  async restart_xray(): Promise<models.SystemActionResponse> {
     return this.request('POST', `/api/system/restart`, undefined, undefined, false);
   }
 
-  async get_health_status() {
+  async get_health_status(): Promise<models.HealthStatusListResponse> {
     return this.request('GET', `/api/health/status`, undefined, undefined, false);
   }
 
-  async get_proxy_health_status(port: number) {
+  async get_proxy_health_status(port: number): Promise<models.ProxyHealthResponse> {
     return this.request('GET', `/api/health/status/${port}`, undefined, undefined, false);
   }
 
-  async get_health_config() {
+  async get_health_config(): Promise<models.HealthConfigResponse> {
     return this.request('GET', `/api/health/config`, undefined, undefined, false);
   }
 
-  async update_health_config(payload: models.HealthConfigUpdate) {
+  async update_health_config(payload: models.HealthConfigUpdate): Promise<models.HealthConfigResponse> {
     return this.request('PUT', `/api/health/config`, undefined, payload, false);
   }
 
-  async reset_proxy_health(port: number) {
+  async reset_proxy_health(port: number): Promise<models.SuccessResponse> {
     return this.request('POST', `/api/health/reset/${port}`, undefined, undefined, false);
   }
 
-  async reset_all_health() {
+  async reset_all_health(): Promise<models.SuccessResponse> {
     return this.request('POST', `/api/health/reset-all`, undefined, undefined, false);
   }
 
-  async run_health_check() {
+  async run_health_check(): Promise<models.HealthStatusListResponse> {
     return this.request('POST', `/api/health/check`, undefined, undefined, false);
   }
 
-  async start_health_monitoring() {
+  async start_health_monitoring(): Promise<models.SuccessResponse> {
     return this.request('POST', `/api/health/monitoring/start`, undefined, undefined, false);
   }
 
-  async stop_health_monitoring() {
+  async stop_health_monitoring(): Promise<models.SuccessResponse> {
     return this.request('POST', `/api/health/monitoring/stop`, undefined, undefined, false);
   }
 
-  async acquire_lease(payload: models.LeaseAcquireRequest) {
+  async acquire_lease(payload: models.LeaseAcquireRequest): Promise<models.LeaseAcquireResponse> {
     return this.request('POST', `/api/lease/acquire`, undefined, payload, true);
   }
 
-  async release_lease(payload: models.LeaseReleaseRequest) {
+  async release_lease(payload: models.LeaseReleaseRequest): Promise<models.LeaseReleaseResponse> {
     return this.request('POST', `/api/lease/release`, undefined, payload, true);
   }
 
-  async set_manual_lease_cooldown(payload: models.LeaseCooldownRequest) {
+  async set_manual_lease_cooldown(payload: models.LeaseCooldownRequest): Promise<models.LeaseCooldownActionResponse> {
     return this.request('POST', `/api/lease/cooldown/manual`, undefined, payload, true);
   }
 
-  async recall_lease_cooldown(payload: models.LeaseCooldownRequest) {
+  async recall_lease_cooldown(payload: models.LeaseCooldownRequest): Promise<models.LeaseCooldownActionResponse> {
     return this.request('POST', `/api/lease/cooldown/recall`, undefined, payload, true);
   }
 
-  async get_lease_status(query: { workspace_id?: string | unknown } = {}) {
+  async apply_timed_lease_cooldown_batch(payload: models.LeaseTimedCooldownBatchRequest): Promise<models.LeaseTimedCooldownBatchResponse> {
+    return this.request('POST', `/api/lease/cooldown/timed/batch`, undefined, payload, true);
+  }
+
+  async reset_workspace_lease_state(payload: models.WorkspaceResetRequest): Promise<models.WorkspaceResetResponse> {
+    return this.request('POST', `/api/lease/workspace/reset`, undefined, payload, true);
+  }
+
+  async get_lease_status(query: { workspace_id?: string | unknown } = {}): Promise<models.LeaseStatusResponse> {
     return this.request('GET', `/api/lease/status`, Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null)), undefined, true);
   }
 
-  async get_lease_stats() {
+  async get_lease_stats(): Promise<models.LeaseStatsResponse> {
     return this.request('GET', `/api/lease/stats`, undefined, undefined, true);
   }
 

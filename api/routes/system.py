@@ -21,7 +21,7 @@ async def get_system_status():
     proxy_service = get_proxy_service()
     subscription_service = get_subscription_service()
     
-    proxies = proxy_service.get_all_proxies()
+    proxies = proxy_service.get_all_proxies(include_disabled=False)
     subscriptions = subscription_service.get_all_subscriptions()
     xray_status = proxy_service.get_xray_status()
     uptime = proxy_service.get_uptime()

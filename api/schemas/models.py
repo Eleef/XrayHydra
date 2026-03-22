@@ -2,7 +2,7 @@
 Pydantic models for API request/response schemas.
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 
@@ -23,10 +23,22 @@ class XrayStatus(str, Enum):
     ERROR = "error"
 
 
+class ProxyPoolStatus(str, Enum):
+    ACTIVE = "active"
+    DEDUPE_DISABLED = "dedupe_disabled"
+
+
 class TestStatus(str, Enum):
     PENDING = "pending"
     TESTING = "testing"
     SUCCESS = "success"
+    FAILED = "failed"
+
+
+class NodeTestJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 
@@ -90,7 +102,9 @@ class NodeResponse(BaseModel):
                 "test_status": "pending",
                 "latency_ms": None,
                 "exit_ip": None,
-                "exit_country": None
+                "exit_country": None,
+                "in_proxy_pool": False,
+                "proxy_port": None,
             }
         }
     )
@@ -104,6 +118,24 @@ class NodeResponse(BaseModel):
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
     exit_country: Optional[str] = None
+    in_proxy_pool: bool = False
+    proxy_port: Optional[int] = None
+
+
+class NodeTestRequest(BaseModel):
+    """Request model for testing subscription nodes."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "node_ids": ["node_sub_ab12cd34_0000", "node_sub_ab12cd34_0001"],
+                "timeout": 5,
+                "test_profile": "multi_target",
+            }
+        }
+    )
+    node_ids: List[str] = Field(..., min_length=1)
+    timeout: int = Field(default=5, ge=1, le=60)
+    test_profile: Literal["multi_target"] = "multi_target"
 
 
 class NodeListResponse(BaseModel):
@@ -116,10 +148,51 @@ class NodeTestResult(BaseModel):
     """Response model for node test result."""
     node_id: str
     name: str
+    proxy_port: Optional[int] = None
     status: TestStatus
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
     exit_country: Optional[str] = None
+    error: Optional[str] = None
+    test_profile: Optional[str] = None
+    tested_target: Optional[str] = None
+    successful_target: Optional[str] = None
+
+
+class NodeBatchTestResponse(BaseModel):
+    """Response model for batch node connectivity tests."""
+    results: List[NodeTestResult]
+    success_count: int
+    failed_count: int
+    test_profile: str = "multi_target"
+
+
+class NodeTestJobResponse(BaseModel):
+    """Response model for asynchronous node test job progress."""
+    job_id: str
+    status: NodeTestJobStatus
+    total: int
+    completed_count: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    progress_percent: int = 0
+    active_target: Optional[str] = None
+    target_index: Optional[int] = None
+    target_total: Optional[int] = None
+    current_target_completed: int = 0
+    current_target_total: int = 0
+    note: Optional[str] = None
+    test_profile: str = "multi_target"
+    results: List[NodeTestResult] = []
+    error: Optional[str] = None
+
+
+class ProxyCooldownCandidate(BaseModel):
+    """A proxy that failed all configured test attempts and may be cooled down."""
+    node_id: str
+    name: str
+    proxy_port: int
+    failed_attempts: int
     error: Optional[str] = None
 
 
@@ -158,7 +231,9 @@ class ProxyResponse(BaseModel):
                 "server_port": 443,
                 "test_status": "success",
                 "latency_ms": 420,
-                "exit_ip": "203.0.113.10"
+                "exit_ip": "203.0.113.10",
+                "pool_status": "active",
+                "disabled_reason": None,
             }
         }
     )
@@ -177,6 +252,8 @@ class ProxyResponse(BaseModel):
     test_status: TestStatus = TestStatus.PENDING
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
+    pool_status: ProxyPoolStatus = ProxyPoolStatus.ACTIVE
+    disabled_reason: Optional[str] = None
 
 
 class ProxyListResponse(BaseModel):
@@ -191,6 +268,44 @@ class ProxyTestAllResponse(BaseModel):
     results: List[NodeTestResult]
     success_count: int
     failed_count: int
+    attempts: int = 1
+    cooldown_candidates: List[ProxyCooldownCandidate] = []
+
+
+class ProxyExitIpDuplicateProxy(BaseModel):
+    """Proxy info used when previewing duplicate exit IP entries."""
+    port: int
+    node_id: str
+    node_name: str
+    exit_ip: str
+    test_status: TestStatus = TestStatus.PENDING
+    latency_ms: Optional[int] = None
+
+
+class ProxyExitIpDuplicateGroup(BaseModel):
+    """One duplicate exit IP group with the recommended keep/remove split."""
+    exit_ip: str
+    keep_proxy: ProxyExitIpDuplicateProxy
+    remove_proxies: List[ProxyExitIpDuplicateProxy]
+
+
+class ProxyExitIpDuplicatePreviewResponse(BaseModel):
+    """Preview response for duplicate exit IP groups in the active proxy pool."""
+    groups: List[ProxyExitIpDuplicateGroup]
+    duplicate_group_count: int
+    duplicate_proxy_count: int
+
+
+class ProxyExitIpDedupeRequest(BaseModel):
+    """Request to disable duplicate proxies after preview confirmation."""
+    disable_ports: List[int] = Field(..., min_length=1)
+
+
+class ProxyExitIpDedupeResponse(BaseModel):
+    """Response after disabling duplicate proxies by exit IP."""
+    disabled_count: int
+    disabled_ports: List[int]
+    kept_ports: List[int]
 
 
 # ==================== System Schemas ====================

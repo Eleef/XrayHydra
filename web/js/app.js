@@ -3,13 +3,43 @@
  * Handles UI interactions and state management
  */
 
+const ALL_WORKSPACES_ID = '__all_workspaces__';
+const GLOBAL_WORKSPACE_ID = '__global__';
+const NODE_EXCLUSION_STORAGE_KEY = 'xray-prism.nodeExclusionKeywords';
+const CURRENT_SUBSCRIPTION_STORAGE_KEY = 'xray-prism.currentSubscriptionId';
+
 class App {
     constructor() {
         // State
         this.subscriptions = [];
         this.currentSubscription = null;
+        this.currentSubscriptionId = localStorage.getItem(CURRENT_SUBSCRIPTION_STORAGE_KEY) || null;
         this.nodes = [];
         this.selectedNodeIds = new Set();
+        this.isNodeTesting = false;
+        this.nodeViewFilters = {
+            onlyAvailable: false,
+            onlyNotInPool: false,
+            onlyFailed: false,
+            sortBy: 'default',
+        };
+        this.nodeExcludeKeywords = this.loadNodeExclusionKeywords();
+        this.nodeTestProgress = {
+            active: false,
+            total: 0,
+            completed: 0,
+            success: 0,
+            failed: 0,
+            percent: 0,
+            actionLabel: '',
+            note: '',
+            statusText: '待开始',
+            activeTarget: null,
+            targetIndex: null,
+            targetTotal: null,
+            currentTargetCompleted: 0,
+            currentTargetTotal: 0,
+        };
         this.proxies = [];
         this.xrayStatus = 'stopped';
         this.healthStates = {};  // {port: healthState}
@@ -24,6 +54,8 @@ class App {
             total_cooldowns: 0,
         };
         this.currentWorkspaceId = localStorage.getItem('xray-prism.currentWorkspaceId') || null;
+        this.pendingTestCooldownReview = null;
+        this.pendingExitIpDedupeReview = null;
 
         // DOM Elements
         this.elements = {
@@ -35,15 +67,49 @@ class App {
             nodesCount: document.getElementById('nodes-count'),
             nodeSearch: document.getElementById('node-search'),
             btnSelectAll: document.getElementById('btn-select-all'),
+            btnTestSelectedNodes: document.getElementById('btn-test-selected-nodes'),
+            btnTestAllNodes: document.getElementById('btn-test-all-nodes'),
+            btnAddSuccessToProxy: document.getElementById('btn-add-success-to-proxy'),
             btnAddToProxy: document.getElementById('btn-add-to-proxy'),
+            nodeFilterAvailable: document.getElementById('node-filter-available'),
+            nodeFilterNotInPool: document.getElementById('node-filter-not-in-pool'),
+            nodeFilterFailed: document.getElementById('node-filter-failed'),
+            nodeSort: document.getElementById('node-sort'),
+            nodeExclusionInput: document.getElementById('node-exclusion-input'),
+            nodeExclusionAdd: document.getElementById('btn-node-exclusion-add'),
+            nodeExclusionTags: document.getElementById('node-exclusion-tags'),
+            nodeTestProgress: document.getElementById('node-test-progress'),
+            nodeTestProgressTitle: document.getElementById('node-test-progress-title'),
+            nodeTestProgressStatus: document.getElementById('node-test-progress-status'),
+            nodeTestProgressCounter: document.getElementById('node-test-progress-counter'),
+            nodeTestProgressFill: document.getElementById('node-test-progress-fill'),
+            nodeTestProgressSuccess: document.getElementById('node-test-progress-success'),
+            nodeTestProgressFailed: document.getElementById('node-test-progress-failed'),
+            nodeTestProgressRate: document.getElementById('node-test-progress-rate'),
+            nodeTestProgressMeta: document.getElementById('node-test-progress-meta'),
             proxiesContainer: document.getElementById('proxies-container'),
             proxiesCount: document.getElementById('proxies-count'),
             btnTestAll: document.getElementById('btn-test-all'),
+            btnDedupeExitIp: document.getElementById('btn-dedupe-exit-ip'),
             btnClearProxies: document.getElementById('btn-clear-proxies'),
+            testCooldownEnabled: document.getElementById('test-cooldown-enabled'),
+            testCooldownAttempts: document.getElementById('test-cooldown-attempts'),
+            testCooldownSeconds: document.getElementById('test-cooldown-seconds'),
+            testCooldownHint: document.getElementById('test-cooldown-hint'),
             workspaceChipList: document.getElementById('workspace-chip-list'),
             currentWorkspaceName: document.getElementById('current-workspace-name'),
             workspaceBarHint: document.getElementById('workspace-bar-hint'),
+            btnResetWorkspace: document.getElementById('btn-reset-workspace'),
+            cooldownList: document.getElementById('cooldown-list'),
             modalAddSubscription: document.getElementById('modal-add-subscription'),
+            modalTestCooldownReview: document.getElementById('modal-test-cooldown-review'),
+            testCooldownReviewMeta: document.getElementById('test-cooldown-review-meta'),
+            testCooldownReviewList: document.getElementById('test-cooldown-review-list'),
+            btnConfirmTestCooldownReview: document.getElementById('btn-confirm-test-cooldown-review'),
+            modalExitIpDedupeReview: document.getElementById('modal-exit-ip-dedupe-review'),
+            exitIpDedupeReviewMeta: document.getElementById('exit-ip-dedupe-review-meta'),
+            exitIpDedupeReviewList: document.getElementById('exit-ip-dedupe-review-list'),
+            btnConfirmExitIpDedupe: document.getElementById('btn-confirm-exit-ip-dedupe'),
             subName: document.getElementById('sub-name'),
             subUrl: document.getElementById('sub-url'),
             btnConfirmAdd: document.getElementById('btn-confirm-add'),
@@ -57,6 +123,7 @@ class App {
      */
     async init() {
         this.bindEvents();
+        this.renderNodeExclusionTags();
         await this.loadInitialData();
 
         // Auto-refresh status every 5 seconds
@@ -82,16 +149,38 @@ class App {
 
         // Nodes
         this.elements.nodeSearch.addEventListener('input', (e) => this.filterNodes(e.target.value));
+        this.elements.nodeFilterAvailable?.addEventListener('change', () => this.handleNodeFilterOrSortChange());
+        this.elements.nodeFilterNotInPool?.addEventListener('change', () => this.handleNodeFilterOrSortChange());
+        this.elements.nodeFilterFailed?.addEventListener('change', () => this.handleNodeFilterOrSortChange());
+        this.elements.nodeSort?.addEventListener('change', () => this.handleNodeFilterOrSortChange());
+        if (this.elements.nodeExclusionAdd) {
+            this.elements.nodeExclusionAdd.addEventListener('click', () => this.addNodeExclusionKeywords());
+        }
+        if (this.elements.nodeExclusionInput) {
+            this.elements.nodeExclusionInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.addNodeExclusionKeywords();
+                }
+            });
+        }
+        this.elements.nodeExclusionTags?.addEventListener('click', (e) => this.handleNodeExclusionTagClick(e));
         this.elements.btnSelectAll.addEventListener('click', () => this.toggleSelectAll());
+        this.elements.btnTestSelectedNodes?.addEventListener('click', () => this.testSelectedNodes());
+        this.elements.btnTestAllNodes?.addEventListener('click', () => this.testAllNodes());
+        this.elements.btnAddSuccessToProxy?.addEventListener('click', () => this.addSuccessfulToProxy());
         this.elements.btnAddToProxy.addEventListener('click', () => this.addSelectedToProxy());
         this.elements.nodesContainer.addEventListener('click', (e) => this.handleNodeClick(e));
         this.elements.nodesContainer.addEventListener('change', (e) => this.handleNodeCheckbox(e));
 
         // Proxies
         this.elements.btnTestAll.addEventListener('click', () => this.testAllProxies());
+        this.elements.btnDedupeExitIp?.addEventListener('click', () => this.previewExitIpDedupe());
         this.elements.btnClearProxies.addEventListener('click', () => this.clearAllProxies());
+        this.elements.testCooldownEnabled?.addEventListener('change', () => this.updateTestCooldownControls());
         this.elements.proxiesContainer.addEventListener('click', (e) => this.handleProxyClick(e));
         this.elements.workspaceChipList?.addEventListener('click', (e) => this.handleWorkspaceChipClick(e));
+        this.elements.cooldownList?.addEventListener('click', (e) => this.handleCooldownListClick(e));
         this.elements.proxiesContainer.addEventListener('contextmenu', (e) => {
             const item = e.target.closest('.proxy-item');
             if (item) {
@@ -129,6 +218,15 @@ class App {
         if (pgAcquire) pgAcquire.addEventListener('click', () => this.playgroundAcquire());
         if (pgRelease) pgRelease.addEventListener('click', () => this.playgroundRelease());
         if (btnRefreshLeases) btnRefreshLeases.addEventListener('click', () => this.refreshLeaseData());
+        if (this.elements.btnResetWorkspace) {
+            this.elements.btnResetWorkspace.addEventListener('click', () => this.resetCurrentWorkspace());
+        }
+        if (this.elements.btnConfirmTestCooldownReview) {
+            this.elements.btnConfirmTestCooldownReview.addEventListener('click', () => this.confirmTestCooldownReview());
+        }
+        if (this.elements.btnConfirmExitIpDedupe) {
+            this.elements.btnConfirmExitIpDedupe.addEventListener('click', () => this.confirmExitIpDedupe());
+        }
     }
 
     /**
@@ -166,6 +264,7 @@ class App {
             const data = await api.getSubscriptions();
             this.subscriptions = data.subscriptions || [];
             this.renderSubscriptions();
+            await this.restoreSubscriptionSelection();
         } catch (error) {
             console.error('Failed to load subscriptions:', error);
             this.elements.subscriptionList.innerHTML = `
@@ -181,6 +280,9 @@ class App {
      */
     renderSubscriptions() {
         if (this.subscriptions.length === 0) {
+            this.currentSubscription = null;
+            this.currentSubscriptionId = null;
+            localStorage.removeItem(CURRENT_SUBSCRIPTION_STORAGE_KEY);
             this.elements.subscriptionList.innerHTML = `
                 <div class="empty-state">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -200,6 +302,26 @@ class App {
             const item = Components.subscriptionItem(sub, isActive);
             this.elements.subscriptionList.appendChild(item);
         });
+    }
+
+    async restoreSubscriptionSelection() {
+        if (this.subscriptions.length === 0) {
+            return;
+        }
+
+        const hasCurrentSelection = this.currentSubscription
+            && this.subscriptions.some((sub) => sub.id === this.currentSubscription.id);
+        if (hasCurrentSelection) {
+            return;
+        }
+
+        const preferredId = this.subscriptions.some((sub) => sub.id === this.currentSubscriptionId)
+            ? this.currentSubscriptionId
+            : this.subscriptions[0]?.id;
+
+        if (preferredId) {
+            await this.selectSubscription(preferredId);
+        }
     }
 
     /**
@@ -229,6 +351,8 @@ class App {
         if (!sub) return;
 
         this.currentSubscription = sub;
+        this.currentSubscriptionId = subId;
+        localStorage.setItem(CURRENT_SUBSCRIPTION_STORAGE_KEY, subId);
         this.selectedNodeIds.clear();
         this.updateAddToProxyButton();
 
@@ -280,11 +404,14 @@ class App {
 
             if (this.currentSubscription?.id === subId) {
                 this.currentSubscription = null;
+                this.currentSubscriptionId = null;
+                localStorage.removeItem(CURRENT_SUBSCRIPTION_STORAGE_KEY);
                 this.nodes = [];
                 this.renderNodes();
             }
 
             this.renderSubscriptions();
+            await this.restoreSubscriptionSelection();
             Components.showToast('订阅已删除', 'success');
         } catch (error) {
             Components.showToast(`删除失败: ${error.message}`, 'error');
@@ -308,6 +435,171 @@ class App {
         document.querySelectorAll('.modal-overlay').forEach(modal => {
             modal.classList.remove('active');
         });
+        this.pendingTestCooldownReview = null;
+        this.pendingExitIpDedupeReview = null;
+    }
+
+    updateTestCooldownControls() {
+        const enabledCheckbox = this.elements.testCooldownEnabled;
+        const attemptsInput = this.elements.testCooldownAttempts;
+        const secondsInput = this.elements.testCooldownSeconds;
+        const hint = this.elements.testCooldownHint;
+        if (!enabledCheckbox || !attemptsInput || !secondsInput || !hint) return;
+
+        const scope = this.getTestCooldownScope();
+        const hasScope = Boolean(scope);
+        enabledCheckbox.disabled = !hasScope;
+        if (!hasScope) {
+            enabledCheckbox.checked = false;
+        }
+
+        const optionEnabled = hasScope && enabledCheckbox.checked;
+        attemptsInput.disabled = !optionEnabled;
+        secondsInput.disabled = !optionEnabled;
+
+        if (!hasScope) {
+            hint.textContent = '未激活具体 workspace 时，将按“所有代理”执行测试并可加入全局冷却';
+        } else if (scope.scopeId === GLOBAL_WORKSPACE_ID && optionEnabled) {
+            hint.textContent = `测试开始后将锁定为 ${scope.scopeLabel}，确认后会加入全局冷却池`;
+        } else if (scope.scopeId === GLOBAL_WORKSPACE_ID) {
+            hint.textContent = '当前视图: 所有代理。测试失败后可选择加入全局冷却池';
+        } else if (optionEnabled) {
+            hint.textContent = `测试开始后将锁定为 ${scope.scopeLabel}，确认后才会加入冷却池`;
+        } else {
+            hint.textContent = `当前范围: ${scope.scopeLabel}`;
+        }
+    }
+
+    openTestCooldownReviewModal(review) {
+        const modal = this.elements.modalTestCooldownReview;
+        const meta = this.elements.testCooldownReviewMeta;
+        const list = this.elements.testCooldownReviewList;
+        if (!modal || !meta || !list) return;
+
+        this.pendingTestCooldownReview = review;
+        meta.textContent = `以下代理在 ${review.scopeLabel} 下连续 ${review.attempts} 次测试失败。确认后会加入 ${review.cooldownSeconds} 秒定时冷却。取消则不会加入。`;
+        list.innerHTML = review.candidates.map((item) => `
+            <div class="test-cooldown-review-item">
+                <div class="test-cooldown-review-info">
+                    <span class="test-cooldown-review-name">${this.escapeHtml(item.name)}</span>
+                    <span class="test-cooldown-review-detail">失败 ${item.failed_attempts} 次${item.error ? ` · ${this.escapeHtml(item.error)}` : ''}</span>
+                </div>
+                <span class="test-cooldown-review-port">:${item.proxy_port}</span>
+            </div>
+        `).join('');
+        modal.classList.add('active');
+    }
+
+    async confirmTestCooldownReview() {
+        const review = this.pendingTestCooldownReview;
+        if (!review) return;
+
+        try {
+            const result = await api.applyTimedLeaseCooldownBatch(
+                review.scopeId,
+                review.candidates.map((item) => item.proxy_port),
+                review.cooldownSeconds
+            );
+            await this.refreshLeaseData();
+            this.closeModals();
+            Components.showToast(
+                `已向 ${review.scopeLabel} 加入 ${result.applied_ports.length} 个冷却，跳过 ${result.skipped_ports.length} 个`,
+                result.skipped_ports.length === 0 ? 'success' : 'warning'
+            );
+        } catch (error) {
+            Components.showToast(`加入冷却失败: ${error.message}`, 'error');
+        }
+    }
+
+    getExitIpDuplicatePreviewFromProxies() {
+        const groups = new Map();
+        this.proxies.forEach((proxy) => {
+            if (!proxy || proxy.pool_status === 'dedupe_disabled') return;
+            const exitIp = String(proxy.exit_ip || '').trim();
+            if (!exitIp) return;
+            const list = groups.get(exitIp) || [];
+            list.push(proxy);
+            groups.set(exitIp, list);
+        });
+
+        const duplicates = [];
+        groups.forEach((items, exitIp) => {
+            if (items.length < 2) return;
+            duplicates.push({
+                exit_ip: exitIp,
+                proxies: items,
+            });
+        });
+        return duplicates;
+    }
+
+    updateExitIpDedupeButton() {
+        const button = this.elements.btnDedupeExitIp;
+        if (!button) return;
+        const duplicateGroups = this.getExitIpDuplicatePreviewFromProxies();
+        const duplicateCount = duplicateGroups.reduce((sum, group) => sum + Math.max(0, group.proxies.length - 1), 0);
+        button.disabled = duplicateCount === 0;
+        button.textContent = duplicateCount > 0 ? `出口IP去重 (${duplicateCount})` : '出口IP去重';
+        button.title = duplicateCount > 0 ? '查看重复出口 IP 并确认去重' : '当前代理池中没有可去重的重复出口 IP';
+    }
+
+    openExitIpDedupeReviewModal(review) {
+        const modal = this.elements.modalExitIpDedupeReview;
+        const meta = this.elements.exitIpDedupeReviewMeta;
+        const list = this.elements.exitIpDedupeReviewList;
+        if (!modal || !meta || !list) return;
+
+        this.pendingExitIpDedupeReview = review;
+        meta.textContent = `检测到 ${review.duplicate_group_count} 组重复出口 IP，共建议禁用 ${review.duplicate_proxy_count} 个代理。确认后将保留每组中优先级最高的 1 个代理，其余代理会保留在代理池中但不再参与运行或测试。`;
+        list.innerHTML = review.groups.map((group) => `
+            <div class="test-cooldown-review-item">
+                <div class="test-cooldown-review-info">
+                    <span class="test-cooldown-review-name">出口IP ${this.escapeHtml(group.exit_ip)}</span>
+                    <span class="test-cooldown-review-detail">保留 :${group.keep_proxy.port} · ${this.escapeHtml(group.keep_proxy.node_name)}${group.keep_proxy.latency_ms ? ` · ${group.keep_proxy.latency_ms}ms` : ''}</span>
+                    ${group.remove_proxies.map((proxy) => `
+                        <span class="test-cooldown-review-detail">禁用 :${proxy.port} · ${this.escapeHtml(proxy.node_name)}${proxy.latency_ms ? ` · ${proxy.latency_ms}ms` : ''}</span>
+                    `).join('')}
+                </div>
+                <span class="test-cooldown-review-port">-${group.remove_proxies.length}</span>
+            </div>
+        `).join('');
+        modal.classList.add('active');
+    }
+
+    async previewExitIpDedupe() {
+        try {
+            const review = await api.previewProxyExitIpDuplicates();
+            if (!review.groups || review.groups.length === 0) {
+                Components.showToast('当前代理池中没有重复出口 IP', 'success');
+                await this.loadProxies();
+                return;
+            }
+            this.openExitIpDedupeReviewModal(review);
+        } catch (error) {
+            Components.showToast(`获取重复出口IP失败: ${error.message}`, 'error');
+        }
+    }
+
+    async confirmExitIpDedupe() {
+        const review = this.pendingExitIpDedupeReview;
+        if (!review) return;
+        const disablePorts = (review.groups || []).flatMap((group) => (group.remove_proxies || []).map((proxy) => proxy.port));
+        if (disablePorts.length === 0) {
+            this.closeModals();
+            return;
+        }
+
+        try {
+            const result = await api.dedupeProxiesByExitIp(disablePorts);
+            this.closeModals();
+            await this.loadProxies();
+            Components.showToast(
+                `已禁用 ${result.disabled_count} 个重复代理，保留 ${result.kept_ports.length} 个出口IP主项`,
+                'success'
+            );
+        } catch (error) {
+            Components.showToast(`出口IP去重失败: ${error.message}`, 'error');
+        }
     }
 
     /**
@@ -353,6 +645,15 @@ class App {
      * Load nodes for a subscription
      */
     async loadNodes(subId) {
+        this.setNodeTestProgress({
+            active: false,
+            total: 0,
+            completed: 0,
+            success: 0,
+            failed: 0,
+            actionLabel: '',
+            note: '',
+        });
         this.elements.nodesContainer.innerHTML = `
             <div class="loading-placeholder">
                 <div class="spinner"></div>
@@ -362,9 +663,16 @@ class App {
 
         try {
             const data = await api.getSubscriptionNodes(subId);
-            this.nodes = data.nodes || [];
-            this.renderNodes();
+            this.nodes = this.mergeProxyPoolState(data.nodes || []);
+            this.syncSelectedNodeIds();
+            this.renderNodeExclusionTags();
+            this.renderCurrentNodeView();
         } catch (error) {
+            this.nodes = [];
+            this.selectedNodeIds.clear();
+            this.elements.nodesCount.textContent = '0';
+            this.renderNodeExclusionTags();
+            this.updateNodeActionButtons();
             this.elements.nodesContainer.innerHTML = `
                 <div class="empty-state">
                     <p>加载节点失败</p>
@@ -378,9 +686,19 @@ class App {
      */
     renderNodes(filteredNodes = null) {
         const nodesToRender = filteredNodes || this.nodes;
-        this.elements.nodesCount.textContent = nodesToRender.length;
+        const visibleCount = nodesToRender.length;
+        const totalCount = this.nodes.length;
+        this.elements.nodesCount.textContent = totalCount === visibleCount ? `${totalCount}` : `${visibleCount}/${totalCount}`;
+
+        const visibleSelectableCount = nodesToRender.filter((node) => !node.in_proxy_pool).length;
+        this.elements.btnSelectAll.disabled = this.isNodeTesting || visibleSelectableCount === 0;
 
         if (nodesToRender.length === 0) {
+            const hasActiveQuery = this.getCurrentNodeFilterQuery().length > 0;
+            const hasActiveFilter = this.hasActiveNodeFilters();
+            const emptyText = this.currentSubscription
+                ? (hasActiveQuery || hasActiveFilter ? '没有匹配的节点' : '当前订阅暂无节点')
+                : '请先选择一个订阅';
             this.elements.nodesContainer.innerHTML = `
                 <div class="empty-state">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -389,47 +707,350 @@ class App {
                         <rect x="14" y="14" width="7" height="7"></rect>
                         <rect x="3" y="14" width="7" height="7"></rect>
                     </svg>
-                    <p>${this.currentSubscription ? '没有找到节点' : '请先选择一个订阅'}</p>
+                    <p>${emptyText}</p>
                 </div>
             `;
+            this.updateNodeActionButtons();
             return;
         }
 
         this.elements.nodesContainer.innerHTML = '';
-        nodesToRender.forEach(node => {
+        nodesToRender.forEach((node) => {
             const isSelected = this.selectedNodeIds.has(node.id);
-            const item = Components.nodeItem(node, isSelected);
+            const item = Components.nodeItem(node, isSelected, {
+                disableNodeCheckbox: node.in_proxy_pool,
+                disableTestButton: this.isNodeTesting,
+            });
             this.elements.nodesContainer.appendChild(item);
         });
+
+        this.updateNodeActionButtons();
+    }
+
+    loadNodeExclusionKeywords() {
+        const raw = localStorage.getItem(NODE_EXCLUSION_STORAGE_KEY);
+        if (!raw) return [];
+        try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .map((entry) => {
+                    if (typeof entry === 'string') {
+                        const trimmed = entry.trim();
+                        return trimmed ? { value: this.normalizeNodeExclusionValue(trimmed), label: trimmed } : null;
+                    }
+                    if (entry && typeof entry === 'object') {
+                        const label = (entry.label || entry.value || '').toString().trim();
+                        const value = this.normalizeNodeExclusionValue(entry.value || label);
+                        return value ? { value, label: label || value } : null;
+                    }
+                    return null;
+                })
+                .filter(Boolean);
+        } catch {
+            return [];
+        }
+    }
+
+    saveNodeExclusionKeywords() {
+        localStorage.setItem(NODE_EXCLUSION_STORAGE_KEY, JSON.stringify(this.nodeExcludeKeywords));
+    }
+
+    normalizeNodeExclusionValue(value) {
+        return (value || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/[\s_-]+/g, '');
+    }
+
+    parseKeywordEntries(raw) {
+        const entries = (raw || '').split(/[\n,，;]+/).map((item) => item.trim()).filter(Boolean);
+        const unique = new Map();
+        entries.forEach((item) => {
+            const normalized = this.normalizeNodeExclusionValue(item);
+            if (normalized && !unique.has(normalized)) {
+                unique.set(normalized, { value: normalized, label: item });
+            }
+        });
+        return Array.from(unique.values());
+    }
+
+    addNodeExclusionKeywords() {
+        if (!this.elements.nodeExclusionInput) return;
+        const raw = this.elements.nodeExclusionInput.value;
+        const additions = this.parseKeywordEntries(raw);
+        if (!additions.length) return;
+        const combined = new Map(this.nodeExcludeKeywords.map((item) => [item.value, item]));
+        additions.forEach((item) => {
+            if (!combined.has(item.value)) {
+                combined.set(item.value, item);
+            }
+        });
+        this.nodeExcludeKeywords = Array.from(combined.values());
+        this.saveNodeExclusionKeywords();
+        this.elements.nodeExclusionInput.value = '';
+        this.renderNodeExclusionTags();
+        this.pruneExcludedSelections();
+        this.renderCurrentNodeView();
+    }
+
+    renderNodeExclusionTags() {
+        if (!this.elements.nodeExclusionTags) return;
+        this.elements.nodeExclusionTags.innerHTML = '';
+        this.nodeExcludeKeywords.forEach((keyword) => {
+            const count = this.getNodeExclusionMatchCount(keyword);
+            const tag = document.createElement('span');
+            tag.className = 'node-exclusion-tag';
+            tag.dataset.value = keyword.value;
+            const label = document.createElement('span');
+            label.textContent = `${keyword.label} (${count})`;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.innerHTML = '&times;';
+            remove.title = '移除关键词';
+            tag.appendChild(label);
+            tag.appendChild(remove);
+            this.elements.nodeExclusionTags.appendChild(tag);
+        });
+    }
+
+    handleNodeExclusionTagClick(e) {
+        const remove = e.target.closest('.node-exclusion-tag button');
+        if (!remove) return;
+        const tag = remove.closest('.node-exclusion-tag');
+        const value = tag?.dataset.value;
+        if (!value) return;
+        this.nodeExcludeKeywords = this.nodeExcludeKeywords.filter((item) => item.value !== value);
+        this.saveNodeExclusionKeywords();
+        this.renderNodeExclusionTags();
+        this.pruneExcludedSelections();
+        this.renderCurrentNodeView();
+    }
+
+    matchesNodeExclusion(node) {
+        if (!node || this.nodeExcludeKeywords.length === 0) {
+            return false;
+        }
+
+        const rawText = `${node.name || ''} ${node.address || ''}`.toLowerCase();
+        const normalizedText = this.normalizeNodeExclusionValue(`${node.name || ''}${node.address || ''}`);
+
+        return this.nodeExcludeKeywords.some((keyword) => (
+            rawText.includes((keyword.label || '').toLowerCase()) || normalizedText.includes(keyword.value)
+        ));
+    }
+
+    getNodeExclusionMatchCount(keyword) {
+        if (!keyword) return 0;
+
+        const loweredLabel = (keyword.label || '').toLowerCase();
+        return this.nodes.filter((node) => {
+            const rawText = `${node.name || ''} ${node.address || ''}`.toLowerCase();
+            const normalizedText = this.normalizeNodeExclusionValue(`${node.name || ''}${node.address || ''}`);
+            return rawText.includes(loweredLabel) || normalizedText.includes(keyword.value);
+        }).length;
+    }
+
+    pruneExcludedSelections() {
+        if (this.nodeExcludeKeywords.length === 0) {
+            return;
+        }
+
+        this.nodes.forEach((node) => {
+            if (!node.in_proxy_pool && this.matchesNodeExclusion(node)) {
+                this.selectedNodeIds.delete(node.id);
+            }
+        });
+    }
+
+    handleNodeFilterOrSortChange() {
+        this.nodeViewFilters = this.getNodeViewFilters();
+        this.renderCurrentNodeView();
+    }
+
+    getNodeViewFilters() {
+        return {
+            onlyAvailable: Boolean(this.elements.nodeFilterAvailable?.checked),
+            onlyNotInPool: Boolean(this.elements.nodeFilterNotInPool?.checked),
+            onlyFailed: Boolean(this.elements.nodeFilterFailed?.checked),
+            sortBy: this.elements.nodeSort?.value || 'default',
+        };
+    }
+
+    hasActiveNodeFilters() {
+        const filters = this.nodeViewFilters || {};
+        return Boolean(filters.onlyAvailable || filters.onlyNotInPool || filters.onlyFailed || this.nodeExcludeKeywords.length > 0);
+    }
+
+    getNodeStatusRank(status) {
+        const rank = {
+            success: 0,
+            testing: 1,
+            pending: 2,
+            failed: 3,
+        };
+        return rank[status] ?? 9;
+    }
+
+    applyNodeSort(nodes, sortBy = 'default') {
+        if (!Array.isArray(nodes) || nodes.length <= 1 || sortBy === 'default') {
+            return nodes;
+        }
+
+        const sorted = [...nodes];
+        if (sortBy === 'test_status') {
+            sorted.sort((a, b) => {
+                const rankDelta = this.getNodeStatusRank(a.test_status) - this.getNodeStatusRank(b.test_status);
+                if (rankDelta !== 0) return rankDelta;
+                const latencyA = typeof a.latency_ms === 'number' ? a.latency_ms : Number.POSITIVE_INFINITY;
+                const latencyB = typeof b.latency_ms === 'number' ? b.latency_ms : Number.POSITIVE_INFINITY;
+                if (latencyA !== latencyB) return latencyA - latencyB;
+                return (a.name || '').localeCompare(b.name || '', 'zh-CN');
+            });
+            return sorted;
+        }
+
+        if (sortBy === 'latency_ms') {
+            sorted.sort((a, b) => {
+                const latencyA = typeof a.latency_ms === 'number' ? a.latency_ms : Number.POSITIVE_INFINITY;
+                const latencyB = typeof b.latency_ms === 'number' ? b.latency_ms : Number.POSITIVE_INFINITY;
+                if (latencyA !== latencyB) return latencyA - latencyB;
+                const rankDelta = this.getNodeStatusRank(a.test_status) - this.getNodeStatusRank(b.test_status);
+                if (rankDelta !== 0) return rankDelta;
+                return (a.name || '').localeCompare(b.name || '', 'zh-CN');
+            });
+            return sorted;
+        }
+
+        return sorted;
+    }
+
+    getNodesForCurrentView(query = '') {
+        const lowerQuery = (query || '').trim().toLowerCase();
+        const filters = this.nodeViewFilters || this.getNodeViewFilters();
+
+        const filtered = this.nodes.filter((node) => {
+            if (this.matchesNodeExclusion(node)) {
+                return false;
+            }
+
+            if (lowerQuery) {
+                const name = (node.name || '').toLowerCase();
+                const address = (node.address || '').toLowerCase();
+                const protocol = (node.protocol || '').toLowerCase();
+                const matchesQuery =
+                    name.includes(lowerQuery) ||
+                    address.includes(lowerQuery) ||
+                    protocol.includes(lowerQuery);
+                if (!matchesQuery) {
+                    return false;
+                }
+            }
+
+            if (filters.onlyAvailable && node.test_status !== 'success') {
+                return false;
+            }
+            if (filters.onlyNotInPool && node.in_proxy_pool) {
+                return false;
+            }
+            if (filters.onlyFailed && node.test_status !== 'failed') {
+                return false;
+            }
+
+            return true;
+        });
+
+        return this.applyNodeSort(filtered, filters.sortBy);
     }
 
     /**
      * Filter nodes by search query
      */
     filterNodes(query) {
-        if (!query) {
-            this.renderNodes();
-            return;
-        }
+        this.nodeViewFilters = this.getNodeViewFilters();
+        const nodesToRender = this.getNodesForCurrentView(query);
+        this.renderNodes(nodesToRender);
+    }
 
-        const lowerQuery = query.toLowerCase();
-        const filtered = this.nodes.filter(node =>
-            node.name.toLowerCase().includes(lowerQuery) ||
-            node.address.toLowerCase().includes(lowerQuery) ||
-            node.protocol.toLowerCase().includes(lowerQuery)
+    mergeProxyPoolState(nodes, { preferProxyMap = false } = {}) {
+        const proxyPortByNodeId = new Map(
+            (this.proxies || [])
+                .filter((proxy) => proxy && proxy.node_id)
+                .map((proxy) => [proxy.node_id, proxy.port])
         );
-        this.renderNodes(filtered);
+
+        return nodes.map((node) => {
+            const fallbackPort = proxyPortByNodeId.get(node.id) ?? null;
+            const hasExplicitPoolFlag = typeof node.in_proxy_pool === 'boolean';
+            const inProxyPool = preferProxyMap
+                ? Boolean(fallbackPort !== null)
+                : (hasExplicitPoolFlag ? node.in_proxy_pool : Boolean(fallbackPort !== null));
+            return {
+                ...node,
+                in_proxy_pool: inProxyPool,
+                proxy_port: inProxyPool
+                    ? (preferProxyMap ? fallbackPort : (node.proxy_port ?? fallbackPort))
+                    : null,
+            };
+        });
+    }
+
+    syncSelectedNodeIds() {
+        const validNodeIds = new Set(this.nodes.map((node) => node.id));
+        const nextSelected = new Set();
+
+        this.selectedNodeIds.forEach((nodeId) => {
+            if (validNodeIds.has(nodeId)) {
+                nextSelected.add(nodeId);
+            }
+        });
+
+        this.nodes.forEach((node) => {
+            if (node.in_proxy_pool) {
+                nextSelected.add(node.id);
+            }
+        });
+
+        this.selectedNodeIds = nextSelected;
+        this.pruneExcludedSelections();
+    }
+
+    isNodeSelectable(node) {
+        return Boolean(node) && !node.in_proxy_pool;
+    }
+
+    getCurrentNodeFilterQuery() {
+        return (this.elements.nodeSearch?.value || '').trim();
+    }
+
+    renderCurrentNodeView() {
+        const query = this.getCurrentNodeFilterQuery();
+        this.filterNodes(query);
+    }
+
+    getActionableNodesForCurrentView() {
+        return this.getNodesForCurrentView(this.getCurrentNodeFilterQuery());
     }
 
     /**
      * Handle node item click
      */
-    handleNodeClick(e) {
+    async handleNodeClick(e) {
         const item = e.target.closest('.node-item');
         if (!item) return;
 
+        const action = e.target.closest('[data-node-action]')?.dataset.nodeAction;
+        if (action === 'test') {
+            await this.testSingleNode(item.dataset.id);
+            return;
+        }
+
         // Don't toggle if clicking on checkbox directly
-        if (e.target.classList.contains('node-checkbox')) return;
+        if (e.target.closest('.node-checkbox')) return;
+
+        const node = this.nodes.find((candidate) => candidate.id === item.dataset.id);
+        if (!node || node.in_proxy_pool || this.isNodeTesting) return;
 
         const checkbox = item.querySelector('.node-checkbox');
         checkbox.checked = !checkbox.checked;
@@ -442,6 +1063,10 @@ class App {
     handleNodeCheckbox(e) {
         const checkbox = e.target;
         if (!checkbox.classList.contains('node-checkbox')) return;
+        if (checkbox.disabled) {
+            checkbox.checked = true;
+            return;
+        }
 
         const item = checkbox.closest('.node-item');
         const nodeId = item.dataset.id;
@@ -454,40 +1079,45 @@ class App {
             item.classList.remove('selected');
         }
 
-        this.updateAddToProxyButton();
+        this.updateNodeActionButtons();
     }
 
     /**
      * Toggle select all nodes
      */
     toggleSelectAll() {
-        const allSelected = this.selectedNodeIds.size === this.nodes.length;
+        if (this.isNodeTesting) return;
+
+        const selectableNodes = this.getNodesForCurrentView(this.getCurrentNodeFilterQuery())
+            .filter((node) => !node.in_proxy_pool);
+        if (selectableNodes.length === 0) {
+            this.updateNodeActionButtons();
+            return;
+        }
+
+        const allSelected = selectableNodes.every((node) => this.selectedNodeIds.has(node.id));
 
         if (allSelected) {
             // Deselect all
-            this.selectedNodeIds.clear();
+            selectableNodes.forEach((node) => this.selectedNodeIds.delete(node.id));
         } else {
             // Select all
-            this.nodes.forEach(node => this.selectedNodeIds.add(node.id));
+            selectableNodes.forEach((node) => this.selectedNodeIds.add(node.id));
         }
 
-        // Update UI
-        document.querySelectorAll('.node-item').forEach(item => {
-            const checkbox = item.querySelector('.node-checkbox');
-            const isSelected = this.selectedNodeIds.has(item.dataset.id);
-            checkbox.checked = isSelected;
-            item.classList.toggle('selected', isSelected);
-        });
-
-        this.updateAddToProxyButton();
+        this.syncSelectedNodeIds();
+        this.renderCurrentNodeView();
     }
 
     /**
      * Update add to proxy button state
      */
     updateAddToProxyButton() {
-        const count = this.selectedNodeIds.size;
-        this.elements.btnAddToProxy.disabled = count === 0;
+        const count = this.getSelectedAddableNodeIds().length;
+        this.elements.btnAddToProxy.disabled = count === 0 || this.isNodeTesting;
+        this.elements.btnAddToProxy.title = this.isNodeTesting
+            ? '节点测试进行中，请稍候'
+            : (count > 0 ? '将已勾选且未入池的节点加入代理池' : '请先勾选未入池节点');
         this.elements.btnAddToProxy.innerHTML = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14"></path>
@@ -497,22 +1127,472 @@ class App {
         `;
     }
 
+    updateSelectAllButton() {
+        if (!this.elements.btnSelectAll) return;
+        const visibleSelectableCount = this.getNodesForCurrentView(this.getCurrentNodeFilterQuery())
+            .filter((node) => !node.in_proxy_pool).length;
+        this.elements.btnSelectAll.disabled = this.isNodeTesting || visibleSelectableCount === 0;
+        this.elements.btnSelectAll.textContent = visibleSelectableCount > 0 ? `全选 (${visibleSelectableCount})` : '全选';
+        this.elements.btnSelectAll.title = this.isNodeTesting
+            ? '节点测试进行中，请稍候'
+            : (visibleSelectableCount > 0
+                ? '勾选当前筛选结果中的未入池节点'
+                : (this.currentSubscription ? '当前列表没有可勾选节点' : '请先选择订阅'));
+    }
+
+    updateNodeTestButtons() {
+        const selectedCount = this.getSelectedTestableNodeIds().length;
+        if (this.elements.btnTestSelectedNodes) {
+            this.elements.btnTestSelectedNodes.disabled = selectedCount === 0 || this.isNodeTesting;
+            this.elements.btnTestSelectedNodes.title = this.isNodeTesting
+                ? '节点测试进行中，请稍候'
+                : (selectedCount > 0 ? '测试当前勾选的未入池节点' : '请先勾选未入池节点');
+            this.elements.btnTestSelectedNodes.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                测试选中${selectedCount > 0 ? ` (${selectedCount})` : ''}
+            `;
+        }
+
+        if (this.elements.btnTestAllNodes) {
+            const totalCount = this.getActionableNodesForCurrentView().length;
+            this.elements.btnTestAllNodes.disabled = totalCount === 0 || this.isNodeTesting;
+            this.elements.btnTestAllNodes.title = this.isNodeTesting
+                ? '节点测试进行中，请稍候'
+                : (totalCount > 0 ? '测试当前筛选结果中的全部节点' : (this.currentSubscription ? '当前筛选结果没有节点' : '请先选择订阅'));
+            this.elements.btnTestAllNodes.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                测试全部${totalCount > 0 ? ` (${totalCount})` : ''}
+            `;
+        }
+    }
+
+    updateAddSuccessToProxyButton() {
+        if (!this.elements.btnAddSuccessToProxy) return;
+        const count = this.getSuccessfulAddableNodeIds().length;
+        this.elements.btnAddSuccessToProxy.disabled = count === 0 || this.isNodeTesting;
+        this.elements.btnAddSuccessToProxy.title = this.isNodeTesting
+            ? '节点测试进行中，请稍候'
+            : (count > 0 ? '将当前筛选结果中测试成功且未入池的节点一次性加入代理池' : '当前筛选结果中暂无测试成功且未入池节点');
+        this.elements.btnAddSuccessToProxy.textContent = `一键加入成功项${count > 0 ? ` (${count})` : ''}`;
+    }
+
+    getSelectedAddableNodeIds() {
+        const addable = [];
+        this.nodes.forEach((node) => {
+            if (!node.in_proxy_pool && this.selectedNodeIds.has(node.id)) {
+                addable.push(node.id);
+            }
+        });
+        return addable;
+    }
+
+    getSelectedTestableNodeIds() {
+        const testable = [];
+        this.nodes.forEach((node) => {
+            if (!node.in_proxy_pool && this.selectedNodeIds.has(node.id)) {
+                testable.push(node.id);
+            }
+        });
+        return testable;
+    }
+
+    getSuccessfulAddableNodeIds() {
+        return this.getActionableNodesForCurrentView()
+            .filter((node) => !node.in_proxy_pool && node.test_status === 'success')
+            .map((node) => node.id);
+    }
+
+    setNodeTestingState(isTesting) {
+        this.isNodeTesting = isTesting;
+        this.updateNodeActionButtons();
+    }
+
+    updateNodeActionButtons() {
+        this.updateAddToProxyButton();
+        this.updateNodeTestButtons();
+        this.updateAddSuccessToProxyButton();
+        this.updateSelectAllButton();
+    }
+
+    setNodeTestProgress(patch = {}) {
+        this.nodeTestProgress = {
+            ...this.nodeTestProgress,
+            ...patch,
+        };
+        this.renderNodeTestProgress();
+    }
+
+    renderNodeTestProgress() {
+        const container = this.elements.nodeTestProgress;
+        if (!container) return;
+
+        const progress = this.nodeTestProgress || {};
+        const total = progress.total || 0;
+        if (total <= 0) {
+            container.classList.add('hidden');
+            return;
+        }
+
+        const completed = Math.max(0, Math.min(total, progress.completed || 0));
+        const percent = Math.max(0, Math.min(100, progress.percent ?? (total > 0 ? Math.round((completed / total) * 100) : 0)));
+        const currentTargetCompleted = Math.max(0, progress.currentTargetCompleted || 0);
+        const currentTargetTotal = Math.max(0, progress.currentTargetTotal || 0);
+
+        const title = this.elements.nodeTestProgressTitle;
+        const status = this.elements.nodeTestProgressStatus;
+        const counter = this.elements.nodeTestProgressCounter;
+        const fill = this.elements.nodeTestProgressFill;
+        const success = this.elements.nodeTestProgressSuccess;
+        const failed = this.elements.nodeTestProgressFailed;
+        const rate = this.elements.nodeTestProgressRate;
+        const meta = this.elements.nodeTestProgressMeta;
+        const successCount = progress.success || 0;
+        const failedCount = progress.failed || 0;
+        const successRate = total > 0 ? Math.round((successCount / total) * 100) : 0;
+
+        if (title) {
+            const prefix = progress.actionLabel || '节点测试';
+            title.textContent = progress.active ? `${prefix}进行中` : `${prefix}完成`;
+        }
+        if (status) {
+            status.textContent = progress.statusText || (progress.active ? '正在测试' : (completed >= total ? '已完成' : '待开始'));
+        }
+        if (counter) {
+            counter.textContent = progress.active && currentTargetTotal > 0
+                ? `${currentTargetCompleted}/${currentTargetTotal}`
+                : `${completed}/${total}`;
+        }
+        if (fill) {
+            fill.style.width = `${percent}%`;
+        }
+        if (success) {
+            success.textContent = `成功 ${successCount}`;
+        }
+        if (failed) {
+            failed.textContent = `失败 ${failedCount}`;
+        }
+        if (rate) {
+            rate.textContent = progress.active ? `进度 ${percent}%` : `成功率 ${successRate}%`;
+        }
+        if (meta) {
+            if (progress.active) {
+                const targetLabel = progress.targetIndex && progress.targetTotal
+                    ? `目标 ${progress.targetIndex}/${progress.targetTotal}`
+                    : '目标测试中';
+                const targetUrl = progress.activeTarget ? ` · ${progress.activeTarget}` : '';
+                const currentLabel = currentTargetTotal > 0
+                    ? `当前 ${currentTargetCompleted}/${currentTargetTotal}`
+                    : `已确认 ${completed}/${total}`;
+                const extraNote = progress.note ? ` · ${progress.note}` : '';
+                meta.textContent = `${targetLabel} · ${currentLabel} · 已确认 ${completed}/${total}${targetUrl}${extraNote}`;
+            } else {
+                const note = progress.note ? ` · ${progress.note}` : '';
+                meta.textContent = `已完成 ${completed} / ${total}${note}`;
+            }
+        }
+
+        container.classList.toggle('testing', Boolean(progress.active));
+        container.classList.toggle('done', !progress.active && completed >= total);
+        container.classList.remove('hidden');
+    }
+
+    markNodesAsTesting(nodeIds) {
+        const targetSet = new Set(nodeIds);
+        this.nodes = this.nodes.map((node) => {
+            if (targetSet.has(node.id)) {
+                return {
+                    ...node,
+                    test_status: 'testing',
+                    test_error: null,
+                    successful_target: null,
+                    tested_target: null,
+                };
+            }
+            return node;
+        });
+        this.renderNodeExclusionTags();
+    }
+
+    applyNodeTestResults(results) {
+        if (!Array.isArray(results) || results.length === 0) return;
+
+        const resultById = new Map(results.map((result) => [result.node_id, result]));
+        this.nodes = this.nodes.map((node) => {
+            const result = resultById.get(node.id);
+            if (!result) return node;
+
+            return {
+                ...node,
+                test_status: result.status || node.test_status,
+                latency_ms: result.latency_ms ?? null,
+                exit_ip: result.exit_ip ?? null,
+                exit_country: result.exit_country ?? null,
+                test_error: result.error ?? result.error_message ?? result.reason ?? null,
+                successful_target: result.successful_target ?? result.success_target ?? result.target_hit ?? null,
+                tested_target: result.tested_target ?? result.last_test_target ?? null,
+            };
+        });
+        this.renderNodeExclusionTags();
+    }
+
+    autoSelectSuccessNodes(targetNodeIds, results) {
+        const resultById = new Map((results || []).map((result) => [result.node_id, result]));
+        targetNodeIds.forEach((nodeId) => {
+            const node = this.nodes.find((item) => item.id === nodeId);
+            if (!node || node.in_proxy_pool) {
+                return;
+            }
+            const result = resultById.get(nodeId);
+            if (result?.status === 'success') {
+                this.selectedNodeIds.add(nodeId);
+            } else if (result?.status === 'failed') {
+                this.selectedNodeIds.delete(nodeId);
+            }
+        });
+    }
+
+    async pollNodeTestJob(jobId, actionLabel) {
+        while (true) {
+            const snapshot = await api.getNodeTestJob(jobId);
+            this.setNodeTestProgress({
+                active: snapshot.status === 'queued' || snapshot.status === 'running',
+                total: snapshot.total || 0,
+                completed: snapshot.completed_count || 0,
+                success: snapshot.success_count || 0,
+                failed: snapshot.failed_count || 0,
+                percent: snapshot.progress_percent || 0,
+                actionLabel,
+                note: snapshot.note || '',
+                statusText: snapshot.status === 'queued'
+                    ? '排队中'
+                    : (snapshot.status === 'running'
+                        ? '正在测试'
+                        : (snapshot.status === 'completed' ? '已完成' : '失败')),
+                activeTarget: snapshot.active_target || null,
+                targetIndex: snapshot.target_index ?? null,
+                targetTotal: snapshot.target_total ?? null,
+                currentTargetCompleted: snapshot.current_target_completed || 0,
+                currentTargetTotal: snapshot.current_target_total || 0,
+            });
+
+            if (snapshot.status === 'completed' || snapshot.status === 'failed') {
+                return snapshot;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+    }
+
+    async runNodeTests(nodeIds, { autoSelectSuccess = false, actionLabel = '测试' } = {}) {
+        const uniqueNodeIds = Array.from(new Set((nodeIds || []).filter(Boolean)));
+        if (uniqueNodeIds.length === 0) {
+            Components.showToast('请先选择可测试节点', 'warning');
+            return;
+        }
+
+        const previousResultsByNodeId = new Map();
+        uniqueNodeIds.forEach((nodeId) => {
+            const node = this.nodes.find((item) => item.id === nodeId);
+            if (!node) return;
+            previousResultsByNodeId.set(nodeId, {
+                test_status: node.test_status,
+                latency_ms: node.latency_ms,
+                exit_ip: node.exit_ip,
+                exit_country: node.exit_country,
+                test_error: node.test_error,
+                successful_target: node.successful_target,
+                tested_target: node.tested_target,
+            });
+        });
+
+        this.setNodeTestProgress({
+            active: true,
+            total: uniqueNodeIds.length,
+            completed: 0,
+            success: 0,
+            failed: 0,
+            percent: 0,
+            actionLabel,
+            note: '等待任务启动',
+            statusText: '排队中',
+            activeTarget: null,
+            targetIndex: null,
+            targetTotal: null,
+            currentTargetCompleted: 0,
+            currentTargetTotal: 0,
+        });
+        this.setNodeTestingState(true);
+        this.markNodesAsTesting(uniqueNodeIds);
+        this.renderCurrentNodeView();
+
+        try {
+            const job = await api.startNodeTestJob(uniqueNodeIds, 5, 'multi_target');
+            const result = await this.pollNodeTestJob(job.job_id, actionLabel);
+            if (result.status === 'failed') {
+                throw new Error(result.error || result.note || '节点测试任务失败');
+            }
+            const results = result.results || [];
+            this.applyNodeTestResults(results);
+
+            const successCount = typeof result.success_count === 'number'
+                ? result.success_count
+                : results.filter((item) => item.status === 'success').length;
+            const failedCount = typeof result.failed_count === 'number'
+                ? result.failed_count
+                : results.filter((item) => item.status === 'failed').length;
+            const hitTargets = Array.from(
+                new Set(
+                    results
+                        .filter((item) => item.status === 'success')
+                        .map((item) => item.successful_target || item.success_target || item.target_hit)
+                        .filter(Boolean)
+                )
+            );
+            this.setNodeTestProgress({
+                active: false,
+                total: uniqueNodeIds.length,
+                completed: uniqueNodeIds.length,
+                success: successCount,
+                failed: failedCount,
+                percent: 100,
+                actionLabel,
+                note: hitTargets.length > 0 ? `命中目标源 ${hitTargets.length}` : '',
+                statusText: '已完成',
+                activeTarget: null,
+                targetIndex: null,
+                targetTotal: null,
+                currentTargetCompleted: 0,
+                currentTargetTotal: 0,
+            });
+
+            if (autoSelectSuccess) {
+                this.autoSelectSuccessNodes(uniqueNodeIds, results);
+            }
+
+            this.syncSelectedNodeIds();
+            this.renderCurrentNodeView();
+            Components.showToast(
+                `${actionLabel}完成: ${successCount} 成功, ${failedCount} 失败`,
+                failedCount === 0 ? 'success' : 'warning'
+            );
+        } catch (error) {
+            this.setNodeTestProgress({
+                active: false,
+                total: uniqueNodeIds.length,
+                completed: uniqueNodeIds.length,
+                success: 0,
+                failed: uniqueNodeIds.length,
+                percent: 100,
+                actionLabel,
+                note: '请求失败',
+                statusText: '失败',
+                activeTarget: null,
+                targetIndex: null,
+                targetTotal: null,
+                currentTargetCompleted: 0,
+                currentTargetTotal: 0,
+            });
+            Components.showToast(`${actionLabel}失败: ${error.message}`, 'error');
+            this.nodes = this.nodes.map((node) => {
+                const previous = previousResultsByNodeId.get(node.id);
+                if (previous) {
+                    return {
+                        ...node,
+                        test_status: previous.test_status,
+                        latency_ms: previous.latency_ms,
+                        exit_ip: previous.exit_ip,
+                        exit_country: previous.exit_country,
+                        test_error: previous.test_error,
+                        successful_target: previous.successful_target,
+                        tested_target: previous.tested_target,
+                    };
+                }
+                return node;
+            });
+            this.renderCurrentNodeView();
+        } finally {
+            this.setNodeTestingState(false);
+        }
+    }
+
+    async testSingleNode(nodeId) {
+        const node = this.nodes.find((item) => item.id === nodeId);
+        if (!node) return;
+        await this.runNodeTests([nodeId], {
+            autoSelectSuccess: false,
+            actionLabel: `节点 ${node.name} 测试`,
+        });
+    }
+
+    async testSelectedNodes() {
+        const nodeIds = this.getSelectedTestableNodeIds();
+        await this.runNodeTests(nodeIds, {
+            autoSelectSuccess: true,
+            actionLabel: '选中节点测试',
+        });
+    }
+
+    async testAllNodes() {
+        const nodeIds = this.getActionableNodesForCurrentView().map((node) => node.id);
+        await this.runNodeTests(nodeIds, {
+            autoSelectSuccess: true,
+            actionLabel: '全部节点测试',
+        });
+    }
+
     /**
      * Add selected nodes to proxy list
      */
     async addSelectedToProxy() {
-        if (this.selectedNodeIds.size === 0) return;
+        const nodeIds = this.getSelectedAddableNodeIds();
+        if (nodeIds.length === 0) return;
+        await this.addNodesToProxy(nodeIds, 'selected');
+    }
 
+    async addSuccessfulToProxy() {
+        const nodeIds = this.getSuccessfulAddableNodeIds();
+        if (nodeIds.length === 0) {
+            Components.showToast('暂无可加入的成功节点', 'warning');
+            return;
+        }
+        await this.addNodesToProxy(nodeIds, 'success_only');
+    }
+
+    async addNodesToProxy(nodeIds, mode = 'selected') {
         try {
-            const nodeIds = Array.from(this.selectedNodeIds);
-            await api.addProxies(nodeIds);
+            const addedProxies = await api.addProxies(nodeIds);
 
-            this.selectedNodeIds.clear();
-            this.renderNodes();
-            this.updateAddToProxyButton();
+            if (Array.isArray(addedProxies)) {
+                const addedByNodeId = new Map(
+                    addedProxies
+                        .filter((proxy) => proxy?.node_id)
+                        .map((proxy) => [proxy.node_id, proxy.port || null])
+                );
+
+                this.nodes = this.nodes.map((node) => {
+                    if (!addedByNodeId.has(node.id)) return node;
+                    return {
+                        ...node,
+                        in_proxy_pool: true,
+                        proxy_port: addedByNodeId.get(node.id),
+                    };
+                });
+            }
+
+            this.syncSelectedNodeIds();
+            this.renderCurrentNodeView();
 
             await this.loadProxies();
-            Components.showToast(`已添加 ${nodeIds.length} 个节点到代理列表`, 'success');
+            const message = mode === 'success_only'
+                ? `已一键添加 ${nodeIds.length} 个可用节点到代理列表`
+                : `已添加 ${nodeIds.length} 个节点到代理列表`;
+            Components.showToast(message, 'success');
         } catch (error) {
             Components.showToast(`添加失败: ${error.message}`, 'error');
         }
@@ -528,6 +1608,12 @@ class App {
             const data = await api.getProxies();
             this.proxies = data.proxies || [];
             this.xrayStatus = data.xray_status || 'stopped';
+            if (this.nodes.length > 0) {
+                this.nodes = this.mergeProxyPoolState(this.nodes, { preferProxyMap: true });
+                this.syncSelectedNodeIds();
+                this.renderNodeExclusionTags();
+                this.renderCurrentNodeView();
+            }
             this.renderProxies();
             this.updateXrayStatus();
         } catch (error) {
@@ -535,13 +1621,23 @@ class App {
         }
     }
 
+    getEnabledProxies() {
+        return (this.proxies || []).filter((proxy) => proxy?.pool_status !== 'dedupe_disabled');
+    }
+
+    getProxyByPort(port) {
+        return (this.proxies || []).find((proxy) => proxy?.port === port) || null;
+    }
+
     /**
      * Render proxies list
      */
     renderProxies() {
+        const enabledProxyCount = this.getEnabledProxies().length;
         this.elements.proxiesCount.textContent = this.proxies.length;
-        this.elements.btnTestAll.disabled = this.proxies.length === 0 || this.xrayStatus !== 'running';
+        this.elements.btnTestAll.disabled = enabledProxyCount === 0 || this.xrayStatus !== 'running';
         this.elements.btnClearProxies.disabled = this.proxies.length === 0;
+        this.updateExitIpDedupeButton();
 
         if (this.proxies.length === 0) {
             this.elements.proxiesContainer.innerHTML = `
@@ -570,18 +1666,97 @@ class App {
     }
 
     getProxyWorkspaceState(proxy) {
+        const activeLeases = this.leaseStatus.active_leases || [];
+        const cooldowns = this.leaseStatus.cooldowns || [];
+
+        if (proxy?.pool_status === 'dedupe_disabled') {
+            return {
+                stateClass: 'dedupe-disabled',
+                stateLabel: '去重禁用',
+                sourceLabel: 'exit-ip',
+                note: '该代理因重复出口 IP 被禁用，仍保留在代理池中以避免重复加入。',
+                canCopy: false,
+                canTest: false,
+                canCooldown: false,
+                canRecall: false,
+            };
+        }
+
         if (!this.currentWorkspaceId) {
             return {
                 stateClass: 'unscoped',
                 stateLabel: '未选择 workspace',
                 sourceLabel: '',
                 note: '请选择一个已有 workspace 后再做手动管理。',
+                canCopy: true,
+                canTest: true,
                 canCooldown: false,
                 canRecall: false,
             };
         }
 
-        const activeLease = (this.leaseStatus.active_leases || []).find(
+        if (this.isAllWorkspacesSelected()) {
+            const activeLease = activeLeases.find((lease) => lease.proxy_port === proxy.port);
+            if (activeLease) {
+                return {
+                    stateClass: 'leased',
+                    stateLabel: '已租约中',
+                    sourceLabel: '',
+                    note: `${activeLease.workspace_id} 正在使用该代理。`,
+                    canCopy: true,
+                    canTest: true,
+                    canCooldown: false,
+                    canRecall: false,
+                };
+            }
+
+            const globalCooldown = cooldowns.find(
+                (item) => item.workspace_id === GLOBAL_WORKSPACE_ID && item.proxy_port === proxy.port
+            );
+            if (globalCooldown) {
+                return {
+                    stateClass: 'cooldown',
+                    stateLabel: '全局冷却中',
+                    sourceLabel: globalCooldown.source === 'manual' ? 'manual' : 'timed',
+                    note: globalCooldown.source === 'manual'
+                        ? '该代理已被手动加入全局冷却，需手动召回。'
+                        : '该代理正处于全局定时冷却，可等待到期或手动召回。',
+                    canCopy: true,
+                    canTest: true,
+                    canCooldown: false,
+                    canRecall: true,
+                };
+            }
+
+            return {
+                stateClass: 'unscoped',
+                stateLabel: '全局视图',
+                sourceLabel: '',
+                note: '请选择具体 workspace 进行手动冷却；测试全部可使用全局冷却。',
+                canCopy: true,
+                canTest: true,
+                canCooldown: false,
+                canRecall: false,
+            };
+        }
+
+        const globalCooldown = cooldowns.find(
+            (item) => item.workspace_id === GLOBAL_WORKSPACE_ID && item.proxy_port === proxy.port
+        );
+        if (globalCooldown) {
+            return {
+                stateClass: 'cooldown',
+                stateLabel: '全局冷却中',
+                sourceLabel: globalCooldown.source === 'manual' ? 'manual' : 'timed',
+                note: '该代理已被全局冷却，请切换到“所有代理”后再召回。',
+                canCopy: true,
+                canTest: true,
+                canCooldown: false,
+                canRecall: false,
+            };
+        }
+
+        const activeLease = activeLeases.find(
             (lease) => lease.workspace_id === this.currentWorkspaceId && lease.proxy_port === proxy.port
         );
         if (activeLease) {
@@ -590,12 +1765,14 @@ class App {
                 stateLabel: '已租约中',
                 sourceLabel: '',
                 note: `${this.currentWorkspaceId} 正在使用该代理。`,
+                canCopy: true,
+                canTest: true,
                 canCooldown: false,
                 canRecall: false,
             };
         }
 
-        const cooldown = (this.leaseStatus.cooldowns || []).find(
+        const cooldown = cooldowns.find(
             (item) => item.workspace_id === this.currentWorkspaceId && item.proxy_port === proxy.port
         );
         if (cooldown) {
@@ -608,6 +1785,8 @@ class App {
                 stateLabel: '冷却中',
                 sourceLabel,
                 note,
+                canCopy: true,
+                canTest: true,
                 canCooldown: false,
                 canRecall: true,
             };
@@ -618,6 +1797,8 @@ class App {
             stateLabel: '可用',
             sourceLabel: '',
             note: `${this.currentWorkspaceId} 可手动冷却该代理。`,
+            canCopy: true,
+            canTest: true,
             canCooldown: true,
             canRecall: false,
         };
@@ -649,10 +1830,29 @@ class App {
         }
     }
 
+    async handleCooldownListClick(e) {
+        const button = e.target.closest('[data-action="recall"]');
+        if (!button || button.disabled) return;
+
+        const item = e.target.closest('.lease-item');
+        if (!item) return;
+
+        const port = parseInt(item.dataset.port, 10);
+        const workspaceId = item.dataset.workspaceId || null;
+        if (Number.isNaN(port)) return;
+
+        await this.recallCooldown(port, workspaceId);
+    }
+
     /**
      * Copy proxy address to clipboard
      */
     async copyProxyAddress(port) {
+        const proxy = this.getProxyByPort(port);
+        if (proxy?.pool_status === 'dedupe_disabled') {
+            Components.showToast('该代理已被去重禁用，当前不提供可用出口地址', 'warning');
+            return;
+        }
         const address = `http://127.0.0.1:${port}`;
         try {
             await navigator.clipboard.writeText(address);
@@ -666,6 +1866,11 @@ class App {
      * Test a single proxy
      */
     async testSingleProxy(port) {
+        const proxy = this.getProxyByPort(port);
+        if (proxy?.pool_status === 'dedupe_disabled') {
+            Components.showToast('该代理已被去重禁用，不能参与测试', 'warning');
+            return;
+        }
         if (this.xrayStatus !== 'running') {
             Components.showToast('请先启动 Xray', 'warning');
             return;
@@ -700,8 +1905,18 @@ class App {
     }
 
     async setManualCooldown(port) {
+        const proxy = this.getProxyByPort(port);
+        if (proxy?.pool_status === 'dedupe_disabled') {
+            Components.showToast('去重禁用代理不参与冷却管理', 'warning');
+            return;
+        }
         if (!this.currentWorkspaceId) {
             Components.showToast('请先选择一个 workspace', 'warning');
+            return;
+        }
+
+        if (this.isAllWorkspacesSelected()) {
+            Components.showToast('请选择具体 workspace 后再手动冷却', 'warning');
             return;
         }
 
@@ -714,18 +1929,53 @@ class App {
         }
     }
 
-    async recallCooldown(port) {
+    async recallCooldown(port, workspaceId = null) {
+        const selectedWorkspaceId = workspaceId || this.currentWorkspaceId;
+        if (!selectedWorkspaceId) {
+            Components.showToast('请先选择一个 workspace', 'warning');
+            return;
+        }
+
+        const targetWorkspaceId = selectedWorkspaceId === ALL_WORKSPACES_ID
+            ? GLOBAL_WORKSPACE_ID
+            : selectedWorkspaceId;
+
+        try {
+            await api.recallLeaseCooldown(targetWorkspaceId, port);
+            await this.refreshLeaseData();
+            Components.showToast(`已召回 ${this.getWorkspaceDisplayLabel(targetWorkspaceId)} 的代理 :${port}`, 'success');
+        } catch (error) {
+            Components.showToast(`召回失败: ${error.message}`, 'error');
+        }
+    }
+
+
+    async resetCurrentWorkspace() {
         if (!this.currentWorkspaceId) {
             Components.showToast('请先选择一个 workspace', 'warning');
             return;
         }
 
+        if (this.isAllWorkspacesSelected()) {
+            Components.showToast('“所有代理”视图不支持复位，请先切换到具体 workspace', 'warning');
+            return;
+        }
+
+        const workspaceId = this.currentWorkspaceId;
+        const confirmed = confirm(`确定要复位 workspace ${workspaceId} 吗？这会清空它的活跃租约和冷却记录。`);
+        if (!confirmed) {
+            return;
+        }
+
         try {
-            await api.recallLeaseCooldown(this.currentWorkspaceId, port);
+            const result = await api.resetWorkspaceLeaseState(workspaceId);
             await this.refreshLeaseData();
-            Components.showToast(`已召回 ${this.currentWorkspaceId} 的代理 :${port}`, 'success');
+            Components.showToast(
+                `已复位 ${workspaceId}，释放 ${result.released_count} 个租约，召回 ${result.recalled_count} 个冷却`,
+                'success'
+            );
         } catch (error) {
-            Components.showToast(`召回失败: ${error.message}`, 'error');
+            Components.showToast(`复位失败: ${error.message}`, 'error');
         }
     }
 
@@ -733,10 +1983,21 @@ class App {
      * Test all proxies
      */
     async testAllProxies() {
+        if (this.getEnabledProxies().length === 0) {
+            Components.showToast('当前没有可测试的有效代理', 'warning');
+            return;
+        }
         if (this.xrayStatus !== 'running') {
             Components.showToast('请先启动 Xray', 'warning');
             return;
         }
+
+        const scope = this.getTestCooldownScope();
+        const useCooldown = Boolean(this.elements.testCooldownEnabled?.checked && scope);
+        const capturedScope = useCooldown ? scope : null;
+        const attempts = useCooldown ? Math.max(1, parseInt(this.elements.testCooldownAttempts?.value, 10) || 2) : 1;
+        const cooldownSeconds = useCooldown ? Math.max(1, parseInt(this.elements.testCooldownSeconds?.value, 10) || 300) : 300;
+        this.pendingTestCooldownReview = null;
 
         this.elements.btnTestAll.disabled = true;
         this.elements.btnTestAll.innerHTML = `
@@ -745,12 +2006,30 @@ class App {
         `;
 
         try {
-            const result = await api.testAllProxies();
+            const result = await api.testAllProxies(5, 20, attempts);
             await this.loadProxies();
-            Components.showToast(
-                `测试完成: ${result.success_count} 成功, ${result.failed_count} 失败`,
-                result.failed_count === 0 ? 'success' : 'warning'
-            );
+
+            if (useCooldown && capturedScope) {
+                const candidates = result.cooldown_candidates || [];
+                if (candidates.length > 0) {
+                    this.openTestCooldownReviewModal({
+                        scopeId: capturedScope.scopeId,
+                        scopeLabel: capturedScope.scopeLabel,
+                        attempts,
+                        cooldownSeconds,
+                        candidates,
+                    });
+                }
+                Components.showToast(
+                    `测试完成: ${result.success_count} 成功, ${result.failed_count} 失败，候选冷却 ${candidates.length} 个`,
+                    result.failed_count === 0 ? 'success' : 'warning'
+                );
+            } else {
+                Components.showToast(
+                    `测试完成: ${result.success_count} 成功, ${result.failed_count} 失败`,
+                    result.failed_count === 0 ? 'success' : 'warning'
+                );
+            }
         } catch (error) {
             Components.showToast(`测试失败: ${error.message}`, 'error');
         } finally {
@@ -828,7 +2107,7 @@ class App {
         this.elements.btnToggleXray.title = isRunning ? '停止 Xray' : '启动 Xray';
 
         // Update test button state
-        this.elements.btnTestAll.disabled = this.proxies.length === 0 || !isRunning;
+        this.elements.btnTestAll.disabled = this.getEnabledProxies().length === 0 || !isRunning;
     }
 
     /**
@@ -862,7 +2141,11 @@ class App {
      * Refresh health status for all proxies
      */
     async refreshHealthStatus() {
-        if (this.proxies.length === 0) return;
+        if (this.getEnabledProxies().length === 0) {
+            this.healthStates = {};
+            this.updateProxyHealthDisplay();
+            return;
+        }
 
         try {
             const data = await api.getHealthStatus();
@@ -893,6 +2176,7 @@ class App {
     updateProxyHealthDisplay() {
         document.querySelectorAll('.proxy-item').forEach(item => {
             const port = parseInt(item.dataset.port);
+            const proxy = this.getProxyByPort(port);
             const health = this.getHealthForPort(port);
 
             // Update or create health indicator
@@ -904,6 +2188,12 @@ class App {
                 if (portEl) {
                     portEl.insertAdjacentElement('afterend', indicator);
                 }
+            }
+
+            if (proxy?.pool_status === 'dedupe_disabled') {
+                indicator.className = 'health-indicator dedupe-disabled';
+                indicator.title = '去重禁用';
+                return;
             }
 
             indicator.className = `health-indicator ${health.status}`;
@@ -953,6 +2243,11 @@ class App {
      * Reset health state for a proxy
      */
     async resetProxyHealth(port) {
+        const proxy = this.getProxyByPort(port);
+        if (proxy?.pool_status === 'dedupe_disabled') {
+            Components.showToast('去重禁用代理不参与健康状态管理', 'warning');
+            return;
+        }
         try {
             await api.resetProxyHealth(port);
             await this.refreshHealthStatus();
@@ -1112,12 +2407,13 @@ class App {
 
     syncCurrentWorkspace() {
         const workspaces = this.leaseStatus.workspaces || [];
+        const isValidAll = this.currentWorkspaceId === ALL_WORKSPACES_ID;
         const exists = workspaces.some((item) => item.workspace_id === this.currentWorkspaceId);
-        if (this.currentWorkspaceId && exists) {
+        if (isValidAll || (this.currentWorkspaceId && exists)) {
             return;
         }
 
-        const nextWorkspace = workspaces[0]?.workspace_id || null;
+        const nextWorkspace = ALL_WORKSPACES_ID;
         this.setCurrentWorkspace(nextWorkspace, { persist: true, rerender: false });
     }
 
@@ -1145,25 +2441,44 @@ class App {
         const hint = this.elements.workspaceBarHint;
         if (!container || !title || !hint) return;
 
+        const resetButton = this.elements.btnResetWorkspace;
         const workspaces = this.leaseStatus.workspaces || [];
         const currentSummary = workspaces.find((item) => item.workspace_id === this.currentWorkspaceId) || null;
+        const allWorkspaceSelected = this.isAllWorkspacesSelected();
+        const totalCount = this.proxies.length;
 
-        if (!this.currentWorkspaceId || !currentSummary) {
+        if (allWorkspaceSelected) {
+            title.textContent = '所有代理';
+            hint.textContent = workspaces.length === 0
+                ? '当前无 workspace 记录；仍可在此视图下测试所有代理，并选择对失败代理执行全局冷却。'
+                : `全量代理视图：活跃 ${this.leaseStatus.total_active || 0} / 冷却 ${this.leaseStatus.total_cooldowns || 0}。测试全部可使用全局冷却。`;
+            if (resetButton) {
+                resetButton.disabled = true;
+            }
+        } else if (!this.currentWorkspaceId || !currentSummary) {
             title.textContent = '未选择';
             hint.textContent = workspaces.length === 0
                 ? '暂无活跃租约或冷却记录，创建租约后会出现在这里。'
                 : '请选择一个 workspace 查看对应的租约和代理状态。';
+            if (resetButton) {
+                resetButton.disabled = true;
+            }
         } else {
             title.textContent = currentSummary.workspace_id;
             hint.textContent = `活跃 ${currentSummary.active_count} / 冷却 ${currentSummary.cooldown_count}`;
+            if (resetButton) {
+                resetButton.disabled = false;
+            }
         }
 
-        if (workspaces.length === 0) {
-            container.innerHTML = '<div class="workspace-empty">暂无可选 workspace</div>';
-            return;
-        }
-
-        container.innerHTML = workspaces.map((workspace) => {
+        const chips = [
+            `
+                <button class="workspace-chip${allWorkspaceSelected ? ' active' : ''}" data-workspace-id="${ALL_WORKSPACES_ID}">
+                    <span>所有代理</span>
+                    <span class="workspace-chip-count">${totalCount}</span>
+                </button>
+            `,
+            ...workspaces.map((workspace) => {
             const total = (workspace.active_count || 0) + (workspace.cooldown_count || 0);
             const active = workspace.workspace_id === this.currentWorkspaceId ? ' active' : '';
             return `
@@ -1172,11 +2487,19 @@ class App {
                     <span class="workspace-chip-count">${total}</span>
                 </button>
             `;
-        }).join('');
+            }),
+        ];
+
+        if (workspaces.length === 0) {
+            chips.push('<div class="workspace-empty">暂无具体 workspace，当前可使用“所有代理”视图。</div>');
+        }
+
+        container.innerHTML = chips.join('');
+        this.updateTestCooldownControls();
     }
 
     renderCurrentWorkspaceLeaseViews() {
-        const workspaceName = this.currentWorkspaceId || '当前 workspace';
+        const workspaceName = this.getCurrentWorkspaceLabel();
         const activeCaption = document.getElementById('active-lease-caption');
         const cooldownCaption = document.getElementById('cooldown-caption');
         if (activeCaption) activeCaption.textContent = workspaceName;
@@ -1188,12 +2511,16 @@ class App {
             return;
         }
 
-        const activeLeases = (this.leaseStatus.active_leases || []).filter(
-            (lease) => lease.workspace_id === this.currentWorkspaceId
-        );
-        const cooldowns = (this.leaseStatus.cooldowns || []).filter(
-            (cooldown) => cooldown.workspace_id === this.currentWorkspaceId
-        );
+        const activeLeases = this.isAllWorkspacesSelected()
+            ? (this.leaseStatus.active_leases || [])
+            : (this.leaseStatus.active_leases || []).filter(
+                (lease) => lease.workspace_id === this.currentWorkspaceId
+            );
+        const cooldowns = this.isAllWorkspacesSelected()
+            ? (this.leaseStatus.cooldowns || [])
+            : (this.leaseStatus.cooldowns || []).filter(
+                (cooldown) => cooldown.workspace_id === this.currentWorkspaceId || cooldown.workspace_id === GLOBAL_WORKSPACE_ID
+            );
 
         this.renderActiveLeases(activeLeases);
         this.renderCooldownPool(cooldowns);
@@ -1218,7 +2545,7 @@ class App {
         if (leases.length === 0) {
             container.innerHTML = `
                 <div class="empty-state small">
-                    <p>当前 workspace 暂无活跃租约</p>
+                    <p>${this.isAllWorkspacesSelected() ? '当前没有活跃租约' : '当前 workspace 暂无活跃租约'}</p>
                 </div>
             `;
             return;
@@ -1229,13 +2556,19 @@ class App {
             const now = new Date();
             const remainingSeconds = Math.max(0, Math.floor((expiresAt - now) / 1000));
             const isExpiring = remainingSeconds < 30;
+            const nodeName = lease.node_name || `代理 :${lease.proxy_port}`;
+            const metaParts = [];
+            if (this.isAllWorkspacesSelected()) {
+                metaParts.push(`工作区: ${lease.workspace_id}`);
+            }
+            metaParts.push(`ID: ${lease.lease_id.slice(0, 8)}...`);
 
             return `
                 <div class="lease-item" data-lease-id="${lease.lease_id}">
                     <span class="lease-item-port">${lease.proxy_port}</span>
                     <div class="lease-item-info">
-                        <span class="lease-item-workspace">${this.escapeHtml(lease.workspace_id)}</span>
-                        <span class="lease-item-meta">ID: ${lease.lease_id.slice(0, 8)}...</span>
+                        <span class="lease-item-title">${this.escapeHtml(nodeName)}</span>
+                        <span class="lease-item-meta">${this.escapeHtml(metaParts.join(' · '))}</span>
                     </div>
                     <span class="lease-item-timer${isExpiring ? ' expiring' : ''}">${this.formatTime(remainingSeconds)}</span>
                 </div>
@@ -1262,7 +2595,7 @@ class App {
         if (cooldowns.length === 0) {
             container.innerHTML = `
                 <div class="empty-state small">
-                    <p>当前 workspace 无冷却中的代理</p>
+                    <p>${this.isAllWorkspacesSelected() ? '当前没有冷却中的代理' : '当前 workspace 无冷却中的代理'}</p>
                 </div>
             `;
             return;
@@ -1275,18 +2608,66 @@ class App {
             const timerLabel = cd.source === 'manual'
                 ? '手动召回'
                 : this.formatTime(remainingSeconds ?? 0);
+            const nodeName = cd.node_name || `代理 :${cd.proxy_port}`;
+            const scopeLabel = cd.workspace_id === GLOBAL_WORKSPACE_ID ? '全局冷却' : `工作区: ${cd.workspace_id}`;
+            const metaParts = [scopeLabel, cd.source === 'manual' ? '手动冷却' : '定时冷却'];
 
             return `
-                <div class="lease-item" data-port="${cd.proxy_port}">
+                <div class="lease-item" data-port="${cd.proxy_port}" data-workspace-id="${this.escapeHtml(cd.workspace_id)}">
                     <span class="lease-item-port">${cd.proxy_port}</span>
                     <div class="lease-item-info">
-                        <span class="lease-item-workspace">${this.escapeHtml(cd.workspace_id)}</span>
-                        <span class="lease-item-meta">${cd.source === 'manual' ? '手动冷却' : '定时冷却'}</span>
+                        <span class="lease-item-title">${this.escapeHtml(nodeName)}</span>
+                        <span class="lease-item-meta">${this.escapeHtml(metaParts.join(' · '))}</span>
                     </div>
-                    <span class="lease-item-timer">${timerLabel}</span>
+                    <div class="lease-item-actions">
+                        <span class="lease-item-timer">${timerLabel}</span>
+                        <button class="btn btn-icon btn-sm" data-action="recall" title="召回冷却">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                                <polyline points="21 3 21 9 15 9"></polyline>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             `;
         }).join('');
+    }
+
+    isAllWorkspacesSelected() {
+        return this.currentWorkspaceId === ALL_WORKSPACES_ID;
+    }
+
+    getCurrentWorkspaceLabel() {
+        return this.isAllWorkspacesSelected() ? '所有代理' : (this.currentWorkspaceId || '所有代理');
+    }
+
+    getWorkspaceDisplayLabel(workspaceId) {
+        if (workspaceId === GLOBAL_WORKSPACE_ID) {
+            return '所有代理（全局冷却）';
+        }
+        if (workspaceId === ALL_WORKSPACES_ID) {
+            return '所有代理';
+        }
+        return workspaceId || '所有代理';
+    }
+
+    getTestCooldownScope() {
+        if (!this.currentWorkspaceId) {
+            return {
+                scopeId: GLOBAL_WORKSPACE_ID,
+                scopeLabel: '所有代理（全局冷却）',
+            };
+        }
+        if (this.isAllWorkspacesSelected()) {
+            return {
+                scopeId: GLOBAL_WORKSPACE_ID,
+                scopeLabel: '所有代理（全局冷却）',
+            };
+        }
+        return {
+            scopeId: this.currentWorkspaceId,
+            scopeLabel: this.currentWorkspaceId,
+        };
     }
 
     /**

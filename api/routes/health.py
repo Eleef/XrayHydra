@@ -140,7 +140,7 @@ async def run_health_check():
     proxy_service = get_proxy_service()
     
     # Get active proxy ports
-    proxies = proxy_service.get_all_proxies()
+    proxies = proxy_service.get_all_proxies(include_disabled=False)
     ports = [p["port"] for p in proxies]
     
     if not ports:
@@ -176,7 +176,7 @@ async def start_monitoring():
     proxy_service = get_proxy_service()
     
     def get_active_ports():
-        proxies = proxy_service.get_all_proxies()
+        proxies = proxy_service.get_all_proxies(include_disabled=False)
         return [p["port"] for p in proxies]
     
     if health_service.start_monitoring(get_active_ports):

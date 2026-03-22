@@ -86,8 +86,55 @@
                             </svg>
                             <input type="text" id="node-search" placeholder="搜索节点...">
                         </div>
-                        <button class="btn btn-secondary btn-sm" id="btn-select-all">
+                        <div class="node-toolbar-group node-filter-group">
+                            <label class="node-filter-option">
+                                <input type="checkbox" id="node-filter-available">
+                                <span>只看可用</span>
+                            </label>
+                            <label class="node-filter-option">
+                                <input type="checkbox" id="node-filter-not-in-pool">
+                                <span>只看未入池</span>
+                            </label>
+                            <label class="node-filter-option">
+                                <input type="checkbox" id="node-filter-failed">
+                                <span>只看失败</span>
+                            </label>
+                        </div>
+                        <div class="node-toolbar-group node-exclusion-group">
+                            <label for="node-exclusion-input">排除关键词</label>
+                            <div class="node-exclusion-input">
+                                <textarea id="node-exclusion-input" placeholder="按回车、逗号或换行输入关键词"></textarea>
+                                <button class="btn btn-secondary btn-sm" id="btn-node-exclusion-add">添加</button>
+                            </div>
+                            <div class="node-exclusion-tags" id="node-exclusion-tags"></div>
+                        </div>
+                        <div class="node-toolbar-group node-sort-group">
+                            <label for="node-sort">排序</label>
+                            <select id="node-sort">
+                                <option value="default">默认顺序</option>
+                                <option value="test_status">按测试状态</option>
+                                <option value="latency_ms">按延迟</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" id="btn-select-all" disabled>
                             全选
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="btn-test-selected-nodes" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                            测试选中
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="btn-test-all-nodes" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                            测试全部
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="btn-add-success-to-proxy" disabled>
+                            一键加入成功项
                         </button>
                         <button class="btn btn-primary btn-sm" id="btn-add-to-proxy" disabled>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -97,6 +144,24 @@
                             添加
                         </button>
                     </div>
+                </div>
+                <div class="node-test-progress hidden" id="node-test-progress">
+                    <div class="node-test-progress-head">
+                        <div class="node-test-progress-head-main">
+                            <span class="node-test-progress-title" id="node-test-progress-title">测试进度</span>
+                            <span class="node-test-progress-status" id="node-test-progress-status">待开始</span>
+                        </div>
+                        <span class="node-test-progress-counter" id="node-test-progress-counter">0/0</span>
+                    </div>
+                    <div class="node-test-progress-track">
+                        <span class="node-test-progress-fill" id="node-test-progress-fill"></span>
+                    </div>
+                    <div class="node-test-progress-stats">
+                        <span class="node-test-progress-stat success" id="node-test-progress-success">成功 0</span>
+                        <span class="node-test-progress-stat failed" id="node-test-progress-failed">失败 0</span>
+                        <span class="node-test-progress-stat neutral" id="node-test-progress-rate">成功率 0%</span>
+                    </div>
+                    <div class="node-test-progress-meta" id="node-test-progress-meta">等待开始</div>
                 </div>
                 <div class="nodes-container" id="nodes-container">
                     <div class="empty-state">
@@ -113,10 +178,10 @@
                 <div class="workspace-bar">
                     <div class="workspace-bar-header">
                         <div>
-                            <p class="workspace-bar-label">当前 Workspace</p>
+                            <p class="workspace-bar-label">当前范围</p>
                             <h3 class="workspace-bar-title" id="current-workspace-name">未选择</h3>
                         </div>
-                        <span class="workspace-bar-hint" id="workspace-bar-hint">仅显示已有租约或冷却记录的 workspace</span>
+                        <span class="workspace-bar-hint" id="workspace-bar-hint">可切换具体 workspace，或查看所有代理</span>
                     </div>
                     <div class="workspace-chip-list" id="workspace-chip-list">
                         <div class="workspace-empty" id="workspace-empty-state">暂无可选 workspace</div>
@@ -154,6 +219,9 @@
                                 </svg>
                                 测试
                             </button>
+                            <button class="btn btn-secondary btn-sm" id="btn-dedupe-exit-ip" disabled>
+                                出口IP去重
+                            </button>
                             <button class="btn btn-danger btn-sm" id="btn-clear-proxies" disabled>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"></polyline>
@@ -163,6 +231,22 @@
                                 </svg>
                                 清空
                             </button>
+                            <label class="test-cooldown-toggle">
+                                <input type="checkbox" id="test-cooldown-enabled" disabled>
+                                <span>失败后加入冷却池</span>
+                            </label>
+                            <div class="test-cooldown-fields" id="test-cooldown-fields">
+                                <label class="test-cooldown-field">
+                                    <span>次数</span>
+                                    <input type="number" id="test-cooldown-attempts" value="2" min="1" max="5" disabled>
+                                </label>
+                                <label class="test-cooldown-field">
+                                    <span>冷却</span>
+                                    <input type="number" id="test-cooldown-seconds" value="300" min="1" max="86400" disabled>
+                                    <em>秒</em>
+                                </label>
+                            </div>
+                            <span class="test-cooldown-hint" id="test-cooldown-hint">选择 workspace 后可启用失败冷却</span>
                         </div>
                     </div>
                     <div class="proxies-container" id="proxies-container">
@@ -309,6 +393,50 @@
                         <div class="spinner-sm"></div>
                     </span>
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-test-cooldown-review">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>确认加入冷却池</h3>
+                <button class="btn-close" data-close-modal>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="test-cooldown-review-meta" id="test-cooldown-review-meta"></p>
+                <div class="test-cooldown-review-list" id="test-cooldown-review-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-close-modal>取消</button>
+                <button class="btn btn-primary" id="btn-confirm-test-cooldown-review">确认加入冷却池</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-exit-ip-dedupe-review">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>确认出口IP去重</h3>
+                <button class="btn-close" data-close-modal>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="test-cooldown-review-meta" id="exit-ip-dedupe-review-meta"></p>
+                <div class="test-cooldown-review-list" id="exit-ip-dedupe-review-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-close-modal>取消</button>
+                <button class="btn btn-primary" id="btn-confirm-exit-ip-dedupe">确认去重</button>
             </div>
         </div>
     </div>

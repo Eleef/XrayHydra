@@ -19,7 +19,11 @@ from api.schemas.lease_models import (
     LeaseReleaseRequest,
     LeaseReleaseResponse,
     LeaseCooldownRequest,
+    LeaseTimedCooldownBatchRequest,
     LeaseCooldownActionResponse,
+    LeaseTimedCooldownBatchResponse,
+    WorkspaceResetRequest,
+    WorkspaceResetResponse,
     LeaseErrorResponse,
     LeaseStatusResponse,
     LeaseStatsResponse,
@@ -30,6 +34,7 @@ from api.schemas.lease_models import (
 from api.services.lease_service import get_lease_manager
 from api.schemas.models import ErrorResponse
 from api.services.proxy_service import build_proxy_access_fields
+from api.services.proxy_service import ProxyService
 
 # Configurable authentication
 # Set LEASE_API_TOKEN environment variable to enable
@@ -225,6 +230,46 @@ async def recall_lease_cooldown(request: LeaseCooldownRequest):
     )
 
 
+@router.post(
+    "/cooldown/timed/batch",
+    response_model=LeaseTimedCooldownBatchResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid timed cooldown batch request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+    },
+    operation_id="applyTimedLeaseCooldownBatch",
+    summary="批量加入定时冷却",
+    description="为指定 workspace 的多个代理端口批量加入定时冷却，活跃租约中的端口会被跳过。"
+)
+async def apply_timed_lease_cooldown_batch(request: LeaseTimedCooldownBatchRequest):
+    """Apply timed cooldowns to multiple proxy ports for one workspace."""
+    manager = get_lease_manager()
+    result = manager.set_timed_cooldowns(
+        workspace_id=request.workspace_id,
+        proxy_ports=request.proxy_ports,
+        cooldown_seconds=request.cooldown_seconds,
+    )
+    return LeaseTimedCooldownBatchResponse(success=True, **result)
+
+
+@router.post(
+    "/workspace/reset",
+    response_model=WorkspaceResetResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid workspace reset request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+    },
+    operation_id="resetWorkspaceLeaseState",
+    summary="Reset workspace lease state",
+    description="Clear the active leases and cooldown records for the specified workspace."
+)
+async def reset_workspace_lease_state(request: WorkspaceResetRequest):
+    """Reset all lease-related state for a workspace."""
+    manager = get_lease_manager()
+    result = manager.reset_workspace(request.workspace_id)
+    return WorkspaceResetResponse(success=True, **result)
+
+
 @router.get(
     "/status",
     response_model=LeaseStatusResponse,
@@ -247,6 +292,11 @@ async def get_lease_status(
 ):
     """Get current lease and cooldown status."""
     manager = get_lease_manager()
+    proxy_service = ProxyService()
+    proxy_by_port = {
+        proxy["port"]: proxy
+        for proxy in proxy_service.get_all_proxies()
+    }
     status = manager.get_status(workspace_id=workspace_id)
     
     # Convert to response model
@@ -255,6 +305,7 @@ async def get_lease_status(
             lease_id=lease["lease_id"],
             workspace_id=lease["workspace_id"],
             proxy_port=lease["proxy_port"],
+            node_name=proxy_by_port.get(lease["proxy_port"], {}).get("node_name"),
             acquired_at=lease["acquired_at"],
             expires_at=lease["expires_at"],
             **build_proxy_access_fields(lease["proxy_port"])
@@ -266,6 +317,7 @@ async def get_lease_status(
         CooldownInfo(
             workspace_id=cd["workspace_id"],
             proxy_port=cd["proxy_port"],
+            node_name=proxy_by_port.get(cd["proxy_port"], {}).get("node_name"),
             until=cd["until"],
             set_at=cd["set_at"],
             source=cd["source"],

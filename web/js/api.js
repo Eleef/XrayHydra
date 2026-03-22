@@ -102,6 +102,51 @@ class ApiClient {
         return this.request(`/nodes/${nodeId}`);
     }
 
+    /**
+     * Test one or multiple nodes without adding them to proxy pool
+     * @param {string[]} nodeIds - Node IDs to test
+     * @param {number} timeout - Timeout in seconds
+     * @param {string} testProfile - Test profile, defaults to multi_target
+     * @returns {Promise<{results: Array, success_count: number, failed_count: number, test_profile: string}>}
+     */
+    async testNodes(nodeIds, timeout = 5, testProfile = 'multi_target') {
+        return this.request('/nodes/test', {
+            method: 'POST',
+            body: JSON.stringify({
+                node_ids: nodeIds,
+                timeout,
+                test_profile: testProfile,
+            }),
+        });
+    }
+
+    /**
+     * Start an asynchronous node test job
+     * @param {string[]} nodeIds - Node IDs to test
+     * @param {number} timeout - Timeout in seconds
+     * @param {string} testProfile - Test profile, defaults to multi_target
+     * @returns {Promise<object>}
+     */
+    async startNodeTestJob(nodeIds, timeout = 5, testProfile = 'multi_target') {
+        return this.request('/nodes/test-jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                node_ids: nodeIds,
+                timeout,
+                test_profile: testProfile,
+            }),
+        });
+    }
+
+    /**
+     * Poll an asynchronous node test job
+     * @param {string} jobId - Test job id
+     * @returns {Promise<object>}
+     */
+    async getNodeTestJob(jobId) {
+        return this.request(`/nodes/test-jobs/${jobId}`);
+    }
+
     // ==================== Proxies ====================
 
     /**
@@ -147,13 +192,34 @@ class ApiClient {
     }
 
     /**
+     * Preview duplicate proxies by exit IP
+     * @returns {Promise<{groups: Array, duplicate_group_count: number, duplicate_proxy_count: number}>}
+     */
+    async previewProxyExitIpDuplicates() {
+        return this.request('/proxies/duplicates/exit-ip');
+    }
+
+    /**
+     * Disable duplicate proxies by exit IP after user confirmation
+     * @param {number[]} disablePorts - Duplicate proxy ports selected for disabling
+     * @returns {Promise<{disabled_count: number, disabled_ports: number[], kept_ports: number[]}>}
+     */
+    async dedupeProxiesByExitIp(disablePorts) {
+        return this.request('/proxies/dedupe/exit-ip', {
+            method: 'POST',
+            body: JSON.stringify({ disable_ports: disablePorts }),
+        });
+    }
+
+    /**
      * Test all proxies
      * @param {number} timeout - Timeout in seconds
      * @param {number} workers - Number of concurrent workers
+     * @param {number} attempts - Number of retry attempts per proxy
      * @returns {Promise<{results: Array, success_count: number, failed_count: number}>}
      */
-    async testAllProxies(timeout = 5, workers = 20) {
-        return this.request(`/proxies/test-all?timeout=${timeout}&workers=${workers}`, {
+    async testAllProxies(timeout = 5, workers = 20, attempts = 1) {
+        return this.request(`/proxies/test-all?timeout=${timeout}&workers=${workers}&attempts=${attempts}`, {
             method: 'POST',
         });
     }
@@ -343,6 +409,36 @@ class ApiClient {
         return this.request('/lease/cooldown/recall', {
             method: 'POST',
             body: JSON.stringify({ workspace_id: workspaceId, proxy_port: proxyPort }),
+        });
+    }
+
+    /**
+     * Apply timed cooldowns to multiple proxy ports within a workspace
+     * @param {string} workspaceId - Workspace identifier
+     * @param {number[]} proxyPorts - Proxy ports to cool down
+     * @param {number} cooldownSeconds - Timed cooldown duration in seconds
+     * @returns {Promise<{success: boolean, workspace_id: string, cooldown_seconds: number, applied_ports: number[], skipped_ports: number[]}>}
+     */
+    async applyTimedLeaseCooldownBatch(workspaceId, proxyPorts, cooldownSeconds = 300) {
+        return this.request('/lease/cooldown/timed/batch', {
+            method: 'POST',
+            body: JSON.stringify({
+                workspace_id: workspaceId,
+                proxy_ports: proxyPorts,
+                cooldown_seconds: cooldownSeconds,
+            }),
+        });
+    }
+
+    /**
+     * Reset all lease state for a workspace
+     * @param {string} workspaceId - Workspace identifier
+     * @returns {Promise<{success: boolean, workspace_id: string, released_count: number, recalled_count: number}>}
+     */
+    async resetWorkspaceLeaseState(workspaceId) {
+        return this.request('/lease/workspace/reset', {
+            method: 'POST',
+            body: JSON.stringify({ workspace_id: workspaceId }),
         });
     }
 

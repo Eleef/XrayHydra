@@ -1,6 +1,6 @@
 # **Development Guide**
 
-Last Updated: 2026-03-07
+Last Updated: 2026-03-22
 
 ## **1. Quick Start Commands (常用命令)**
 
@@ -15,6 +15,22 @@ Last Updated: 2026-03-07
   # 或指定参数
   # python server.py --host 0.0.0.0 --port 8000 --reload
   ```
+  一键启动脚本：
+  ```bash
+  # Windows（支持双击）
+  start_windows.bat
+
+  # Linux
+  chmod +x start_linux.sh
+  ./start_linux.sh
+
+  # 透传参数
+  start_windows.bat --port 8010
+  ./start_linux.sh --host 0.0.0.0 --port 8010
+  ```
+  说明：
+  `start_windows.bat` / `start_linux.sh` 会优先复用项目内 `.venv`；
+  如果虚拟环境不存在，则自动创建并安装 `requirements.txt`。
   OpenAPI 文档地址：
   `http://127.0.0.1:8000/docs`
   `http://127.0.0.1:8000/openapi.json`
@@ -30,6 +46,40 @@ Last Updated: 2026-03-07
   # 运行 OpenAPI / SDK 相关测试
   .venv\Scripts\python.exe -m pytest tests/test_openapi.py tests/test_python_sdk.py -q
   ```
+
+* **Run Real Validation Flow (真实联调验收)**:
+  ```bash
+  # 前置条件：
+  # 1) 本地 server 已启动
+  # 2) 你有可用真实订阅 URL
+  #
+  # 这条脚本覆盖：
+  # 真实订阅节点 -> 节点测试 -> 自动筛选成功节点 -> 加入代理池 -> 代理再测试
+
+  # 基础用法（保留结果，便于手工检查）
+  .venv\Scripts\python.exe scripts\scratch\run_real_node_to_proxy_flow.py ^
+    --base-url http://127.0.0.1:8000 ^
+    --subscription-url "<REAL_SUBSCRIPTION_URL>" ^
+    --subscription-name "real-flow-check" ^
+    --max-nodes 20
+
+  # 验收后自动清理（删除本次新增订阅与代理）
+  .venv\Scripts\python.exe scripts\scratch\run_real_node_to_proxy_flow.py ^
+    --base-url http://127.0.0.1:8000 ^
+    --subscription-url "<REAL_SUBSCRIPTION_URL>" ^
+    --cleanup-subscription ^
+    --cleanup-added-proxies
+  ```
+
+## **2. Node Filter Notes**
+
+*   节点栏现在提供一个“排除关键词”区域（输入 + 标签），可以填 `香港` / `Hongkong` / `Hong Kong` 等关键词组合。输入多个关键字可使用逗号或换行，系统会优先过滤掉 `node.name` / `node.address` 里匹配这些关键词的节点，避免加入非目标出口。
+*   每个排除关键词标签后会显示括号中的匹配数量（例如 `Hong Kong (5)`），数量反映当前节点列表中符合该关键词的项数，节点刷新或关键词更新后会自动同步，方便判断筛选器的过滤力度。
+*   关键词仅指字符串本身，会以 `xray-prism.nodeExclusionKeywords` 写入浏览器 `localStorage`，有效期和其它本地状态一致；刷新页面后依然生效，但它只保存关键词列表（不带勾选结果、测试状态或排序）。
+*   排除逻辑在搜索 / 已有 `onlyAvailable` / `onlyNotInPool` / `onlyFailed` 筛选之前执行，默认持续联动当前排序，关闭某个标签即可立即恢复对应节点。
+*   节点测试进度条（工具栏总进度 + 行内追踪）展示完成节点 / 目标数量、成功/失败计数和当前活跃目标；前端会先调用 `POST /api/nodes/test-jobs` 创建测试任务，再轮询 `GET /api/nodes/test-jobs/{job_id}`，使用其中的 `status`、`progress_percent`、`active_target`、`target_index`、`target_total`、`current_target_completed`、`current_target_total`、`success_count`、`failed_count` 等字段驱动真实进度，替代原有的模拟推进逻辑。
+*   代理栏现在提供手动 `出口IP去重` 按钮。按钮只在当前代理池存在重复出口 IP 时启用，并显示建议禁用数量；点击后会先弹出重复项预览，明确展示每组的“保留 / 禁用”代理，只有用户确认后才会把重复项标记为 `去重禁用`。
+*   `去重禁用` 代理不会从代理池删除，因此节点栏仍会把对应节点显示为“已入池”，避免后续被重复加入；但这些代理不会进入 Xray 运行配置，也不会参与租约、健康测试或代理测试。
 
 * **Environment Setup**:
   ```bash
@@ -98,4 +148,6 @@ Last Updated: 2026-03-07
 * `sdk/typescript` 是从同一份 OpenAPI 契约生成的 TypeScript 客户端，适合浏览器端或 Node.js 调用方。
 * 为避免大体积 JSON 影响 AI 上下文和代码审查，仓库默认不保留 `sdk/python/openapi.json`；只有在调试或对外分发契约文件时才按需导出。
 * 新客户端不应只根据 `host:port` 猜测代理协议，应优先使用 API 返回的 `http_proxy_url` / `socks5_proxy_url` / `socks5h_proxy_url` 字段；如果目标是域名且本机 DNS 不可信，优先使用 `socks5h_proxy_url`。
-* Web 前端的代理栏与租约栏共享当前 workspace 选择器；若要验证“手动冷却/召回”，先通过 Lease Playground 或客户端脚本创建至少一个 workspace 记录。
+* Web 前端的代理栏与租约栏共享顶部范围选择器，并固定提供“所有代理”视图；即使还没有任何 workspace 记录，也可以在该视图下运行“测试全部”，并把失败代理加入全局冷却池。
+* 在具体 workspace 视图下，代理栏支持手动冷却/召回；在租约的冷却池列表中，同样可以按单条记录执行召回。
+* 具体 workspace 视图会展示“当前 workspace + 全局冷却”两个来源的冷却记录；其中全局冷却只会出现在列表里，不计入 workspace 摘要计数。

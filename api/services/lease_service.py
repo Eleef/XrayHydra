@@ -15,6 +15,8 @@ from api.services.health_service import get_health_service
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)  # Default: only warnings and errors
 
+GLOBAL_WORKSPACE_ID = "__global__"
+
 def enable_lease_debug_logging():
     """Enable debug logging for lease operations."""
     logger.setLevel(logging.DEBUG)
@@ -116,6 +118,13 @@ class LeaseManager:
     def _make_key(self, workspace_id: str, port: int) -> str:
         """Create a composite key for workspace:port."""
         return f"{workspace_id}:{port}"
+
+    def _has_active_lease_for_port(self, proxy_port: int) -> bool:
+        """Return whether any non-expired lease currently holds the port."""
+        return any(
+            lease.proxy_port == proxy_port and not lease.is_expired()
+            for lease in self._active_leases.values()
+        )
     
     def _cleanup_expired_leases(self) -> int:
         """Remove expired leases. Returns count of removed leases."""
@@ -169,6 +178,7 @@ class LeaseManager:
         
         for port in healthy_ports:
             key = self._make_key(workspace_id, port)
+            global_key = self._make_key(GLOBAL_WORKSPACE_ID, port)
             
             # Check if leased by this workspace
             if key in self._active_leases:
@@ -181,6 +191,11 @@ class LeaseManager:
                 cooldown = self._cooldowns[key]
                 if not cooldown.is_expired():
                     continue  # Skip, still in cooldown
+
+            if global_key in self._cooldowns:
+                cooldown = self._cooldowns[global_key]
+                if not cooldown.is_expired():
+                    continue  # Skip, globally cooled down
             
             available.append(port)
         
@@ -348,7 +363,10 @@ class LeaseManager:
             self._cleanup_expired_cooldowns()
 
             key = self._make_key(workspace_id, proxy_port)
-            if key in self._active_leases and not self._active_leases[key].is_expired():
+            if workspace_id == GLOBAL_WORKSPACE_ID:
+                if self._has_active_lease_for_port(proxy_port):
+                    return False, "an active lease currently holds this proxy"
+            elif key in self._active_leases and not self._active_leases[key].is_expired():
                 return False, "workspace currently holds an active lease for this proxy"
 
             self._cooldowns[key] = CooldownRecord(
@@ -361,6 +379,63 @@ class LeaseManager:
             logger.info(f"Manual cooldown set: {workspace_id} -> port {proxy_port}")
             return True, None
 
+    def set_timed_cooldown(
+        self,
+        workspace_id: str,
+        proxy_port: int,
+        cooldown_seconds: int,
+    ) -> tuple[bool, Optional[str]]:
+        """Create or replace a timed cooldown for the given workspace and port."""
+        with self._lock:
+            self._cleanup_expired_leases()
+            self._cleanup_expired_cooldowns()
+
+            key = self._make_key(workspace_id, proxy_port)
+            if workspace_id == GLOBAL_WORKSPACE_ID:
+                if self._has_active_lease_for_port(proxy_port):
+                    return False, "an active lease currently holds this proxy"
+            elif key in self._active_leases and not self._active_leases[key].is_expired():
+                return False, "workspace currently holds an active lease for this proxy"
+
+            now = datetime.now()
+            self._cooldowns[key] = CooldownRecord(
+                workspace_id=workspace_id,
+                proxy_port=proxy_port,
+                until=now + timedelta(seconds=cooldown_seconds),
+                set_at=now,
+                source="timed",
+            )
+            logger.info(
+                "Timed cooldown set: %s -> port %s, cooldown=%ss",
+                workspace_id,
+                proxy_port,
+                cooldown_seconds,
+            )
+            return True, None
+
+    def set_timed_cooldowns(
+        self,
+        workspace_id: str,
+        proxy_ports: List[int],
+        cooldown_seconds: int,
+    ) -> dict:
+        """Apply timed cooldowns for multiple ports in one workspace-scoped action."""
+        applied_ports: List[int] = []
+        skipped_ports: List[int] = []
+        for proxy_port in proxy_ports:
+            success, _ = self.set_timed_cooldown(workspace_id, proxy_port, cooldown_seconds)
+            if success:
+                applied_ports.append(proxy_port)
+            else:
+                skipped_ports.append(proxy_port)
+
+        return {
+            "workspace_id": workspace_id,
+            "cooldown_seconds": cooldown_seconds,
+            "applied_ports": applied_ports,
+            "skipped_ports": skipped_ports,
+        }
+
     def recall_cooldown(self, workspace_id: str, proxy_port: int) -> tuple[bool, Optional[str]]:
         """Remove an existing cooldown for the given workspace and port."""
         with self._lock:
@@ -372,6 +447,43 @@ class LeaseManager:
             source = cooldown.source if cooldown else None
             logger.info(f"Cooldown recalled: {workspace_id} -> port {proxy_port}, source={source}")
             return True, source
+
+    def reset_workspace(self, workspace_id: str) -> dict:
+        """Clear all active leases and cooldowns for the given workspace."""
+        with self._lock:
+            self._cleanup_expired_leases()
+            self._cleanup_expired_cooldowns()
+
+            lease_keys = [
+                key for key, lease in self._active_leases.items()
+                if lease.workspace_id == workspace_id
+            ]
+            cooldown_keys = [
+                key for key, cooldown in self._cooldowns.items()
+                if cooldown.workspace_id == workspace_id
+            ]
+
+            released_ports = [self._active_leases[key].proxy_port for key in lease_keys]
+            for key in lease_keys:
+                del self._active_leases[key]
+
+            for key in cooldown_keys:
+                del self._cooldowns[key]
+
+            for port in released_ports:
+                self._update_usage(port)
+
+            logger.info(
+                "Workspace reset: %s, released=%s, recalled=%s",
+                workspace_id,
+                len(lease_keys),
+                len(cooldown_keys),
+            )
+            return {
+                "workspace_id": workspace_id,
+                "released_count": len(lease_keys),
+                "recalled_count": len(cooldown_keys),
+            }
 
     def _build_workspace_summaries(self) -> List[dict]:
         """Summarize active and cooldown state per workspace."""
@@ -392,6 +504,8 @@ class LeaseManager:
                 summary["last_activity_at"] = lease.acquired_at
 
         for cooldown in self._cooldowns.values():
+            if cooldown.workspace_id == GLOBAL_WORKSPACE_ID:
+                continue
             summary = workspace_map.setdefault(
                 cooldown.workspace_id,
                 {
@@ -440,7 +554,7 @@ class LeaseManager:
                 cooldowns = [
                     cd.to_dict()
                     for cd in self._cooldowns.values()
-                    if cd.workspace_id == workspace_id
+                    if cd.workspace_id in {workspace_id, GLOBAL_WORKSPACE_ID}
                 ]
             else:
                 leases = [lease.to_dict() for lease in self._active_leases.values()]

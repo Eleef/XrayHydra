@@ -134,7 +134,8 @@ class ProxyTester:
         self,
         mappings: List[PortMapping],
         proxy_type: str = "http",
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        result_callback: Optional[Callable[[TestResult, int, int], None]] = None,
     ) -> List[TestResult]:
         """
         并发测试所有端口
@@ -143,6 +144,7 @@ class ProxyTester:
             mappings: 端口映射列表
             proxy_type: 代理类型
             progress_callback: 进度回调函数 (completed, total)
+            result_callback: 每个结果返回后的回调 (result, completed, total)
             
         Returns:
             TestResult 列表
@@ -171,6 +173,8 @@ class ProxyTester:
                 
                 if progress_callback:
                     progress_callback(completed, total)
+                if result_callback:
+                    result_callback(result, completed, total)
                 
                 # 日志输出
                 status = "✓" if result.success else "✗"

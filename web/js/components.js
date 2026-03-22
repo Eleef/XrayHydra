@@ -52,28 +52,46 @@ const Components = {
      * Create a node item element
      * @param {object} node - Node data
      * @param {boolean} isSelected - Whether this node is selected
+     * @param {object} options - Rendering options
      * @returns {HTMLElement}
      */
-    nodeItem(node, isSelected = false) {
+    nodeItem(node, isSelected = false, options = {}) {
         const div = document.createElement('div');
-        div.className = `node-item${isSelected ? ' selected' : ''}`;
+        const inProxyPool = Boolean(node.in_proxy_pool);
+        const disableNodeCheckbox = Boolean(options.disableNodeCheckbox || inProxyPool);
+        const disableTestButton = Boolean(options.disableTestButton);
+        div.className = `node-item${isSelected ? ' selected' : ''}${inProxyPool ? ' in-proxy-pool' : ''}`;
         div.dataset.id = node.id;
 
         const statusIcon = this.getStatusIcon(node.test_status);
         const statusText = this.getStatusText(node.test_status, node.latency_ms);
+        const diagnostics = this.getNodeDiagnostics(node);
+        const pooledTag = inProxyPool
+            ? `<span class="node-pool-tag">已入池${node.proxy_port ? ` :${node.proxy_port}` : ''}</span>`
+            : '';
 
         div.innerHTML = `
-            <input type="checkbox" class="node-checkbox" ${isSelected ? 'checked' : ''}>
+            <input type="checkbox" class="node-checkbox" ${isSelected ? 'checked' : ''} ${disableNodeCheckbox ? 'disabled' : ''}>
             <div class="node-info">
                 <span class="node-name">${this.escapeHtml(node.name)}</span>
                 <div class="node-details">
                     <span class="node-protocol">${node.protocol}</span>
                     <span>${this.escapeHtml(node.address)}:${node.port}</span>
+                    ${pooledTag}
                 </div>
+                ${diagnostics}
             </div>
-            <div class="node-status ${node.test_status}">
-                ${statusIcon}
-                <span>${statusText}</span>
+            <div class="node-item-side">
+                <div class="node-status ${node.test_status}">
+                    ${statusIcon}
+                    <span>${statusText}</span>
+                </div>
+                <button class="btn btn-icon btn-sm node-test-btn" data-node-action="test" title="测试节点" ${disableTestButton ? 'disabled' : ''}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </button>
             </div>
         `;
 
@@ -98,6 +116,8 @@ const Components = {
             stateLabel: '未选择 workspace',
             sourceLabel: '',
             note: '请选择一个已有 workspace 后再做手动管理。',
+            canCopy: true,
+            canTest: true,
             canCooldown: false,
             canRecall: false,
         };
@@ -123,13 +143,13 @@ const Components = {
                     ${state.sourceLabel ? `<span class="proxy-state-source">${this.escapeHtml(state.sourceLabel)}</span>` : ''}
                 </span>
                 <div class="proxy-actions">
-                    <button class="btn btn-icon btn-sm" data-action="copy" title="复制代理地址">
+                    <button class="btn btn-icon btn-sm" data-action="copy" title="复制代理地址" ${state.canCopy === false ? 'disabled' : ''}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>
                     </button>
-                    <button class="btn btn-icon btn-sm" data-action="test" title="测试">
+                    <button class="btn btn-icon btn-sm" data-action="test" title="测试" ${state.canTest === false ? 'disabled' : ''}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                             <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -212,7 +232,7 @@ const Components = {
      * @returns {string}
      */
     getStatusText(status, latencyMs) {
-        if (status === 'success' && latencyMs) {
+        if (status === 'success' && latencyMs !== null && latencyMs !== undefined) {
             return `${latencyMs}ms`;
         }
         const texts = {
@@ -222,6 +242,48 @@ const Components = {
             pending: '未测试'
         };
         return texts[status] || '未知';
+    },
+
+    getNodeDiagnostics(node) {
+        const status = node?.test_status || 'pending';
+        const successfulTarget = node?.successful_target || node?.test_target || node?.target_hit || null;
+        const testedTarget = node?.tested_target || node?.last_test_target || null;
+        const failureReason = node?.test_error || node?.error || node?.error_message || null;
+
+        const rows = [];
+        if (status === 'success' && successfulTarget) {
+            rows.push(`
+                <div class="node-diagnostic success">
+                    <span class="node-diagnostic-label">命中目标</span>
+                    <span class="node-diagnostic-value">${this.escapeHtml(successfulTarget)}</span>
+                </div>
+            `);
+        }
+
+        if (status === 'failed') {
+            if (failureReason) {
+                rows.push(`
+                    <div class="node-diagnostic failed">
+                        <span class="node-diagnostic-label">失败原因</span>
+                        <span class="node-diagnostic-value">${this.escapeHtml(failureReason)}</span>
+                    </div>
+                `);
+            }
+            if (testedTarget) {
+                rows.push(`
+                    <div class="node-diagnostic neutral">
+                        <span class="node-diagnostic-label">最后目标</span>
+                        <span class="node-diagnostic-value">${this.escapeHtml(testedTarget)}</span>
+                    </div>
+                `);
+            }
+        }
+
+        if (rows.length === 0) {
+            return '';
+        }
+
+        return `<div class="node-diagnostics">${rows.join('')}</div>`;
     },
 
     /**

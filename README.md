@@ -15,6 +15,7 @@
   - **TTL 机制**: 租约自动过期，防止调用方崩溃导致资源僵死。
   - **客户端冷却**: 支持自定义回收后的冷却时间，精细控制使用频率。
   - **手动冷却 / 召回**: Web UI 和 OpenAPI 均支持按 workspace 手动冷却代理，并在需要时召回。
+  - **测试失败候选冷却**: 手动点击“测试全部”时，可按当前 workspace 或“所有代理（全局冷却）”配置“连续失败 N 次后加入冷却池”，并在确认弹窗中二次确认后才真正加入定时冷却。
   - **LRU 负载均衡**: 智能分配最久未使用的代理端口。
 - 🔀 **Mixed-Port 本地代理**: 每个本地端口由 Xray `socks` inbound 提供，客户端可对同一端口使用 `http://` 或 `socks5://`。
 - 🪟🐧 **跨平台进程管理**: Windows / Linux 下都只回收本项目启动的 Xray 进程，不会全局误杀同机其他实例。
@@ -61,6 +62,16 @@ PORT=8000
 source .venv/bin/activate
 python server.py
 ```
+- 一键启动脚本：
+```bash
+# Windows（支持双击或命令行执行）
+start_windows.bat
+
+# Linux
+chmod +x start_linux.sh
+./start_linux.sh
+```
+- 这两个脚本会自动复用仓库内 `.venv`；如果 `.venv` 不存在，会自动创建并安装 `requirements.txt`。
 - 访问地址: `http://localhost:8000/`
 - API 文档: `http://localhost:8000/docs`
 - OpenAPI JSON: `http://localhost:8000/openapi.json`
@@ -116,6 +127,9 @@ python server.py
 - TypeScript SDK 已由同一份 OpenAPI 契约生成，适合浏览器端控制台、Node.js 自动化和其他 TS 客户端接入。
 - 本地代理端口采用 Xray `socks` inbound，以单端口 mixed-port 方式同时兼容 HTTP 和 SOCKS5 客户端；新客户端应优先使用接口返回的 `http_proxy_url` / `socks5_proxy_url`，不要只拿 `host:port` 自行猜协议。
 - Web 前端右侧代理栏现在基于当前 workspace 展示租约与冷却状态，并支持对可用代理手动冷却、对冷却代理手动召回。
+- 顶部范围选择器包含一个固定的“所有代理”视图：它会聚合当前全部代理对应的租约和冷却状态，并允许在“测试全部”后把失败代理加入全局冷却池。
+- 在具体 workspace 视图下，代理栏可做手动冷却/召回；在租约的冷却池列表中，也可直接对单条冷却记录执行召回。
+- 手动点击“测试全部”时，可选启用“失败后加入冷却池”：可选择当前 workspace，或直接在未激活 workspace / “所有代理”视图下走全局冷却；再配置测试次数和冷却秒数。测试结束后会弹出候选失败清单，只有确认后才会真正加入对应冷却池。
 - `server.py` 现在会在启动前先检查目标端口是否已被占用；如果冲突，会直接提示当前地址不可用，并建议换端口或先停止占用进程。
 
 ## 🔌 代理租约 API 使用示例

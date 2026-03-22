@@ -85,6 +85,53 @@ class LeaseCooldownRequest(BaseModel):
     )
 
 
+class LeaseTimedCooldownBatchRequest(BaseModel):
+    """Request model for applying timed cooldowns to multiple proxy ports."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "workspace_id": "amazon_crawler",
+                "proxy_ports": [10001, 10002],
+                "cooldown_seconds": 300,
+            }
+        }
+    )
+    workspace_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Workspace identifier"
+    )
+    proxy_ports: List[int] = Field(
+        ...,
+        min_length=1,
+        description="Local proxy ports to cool down"
+    )
+    cooldown_seconds: int = Field(
+        default=300,
+        ge=1,
+        le=86400,
+        description="Timed cooldown duration in seconds"
+    )
+
+
+class WorkspaceResetRequest(BaseModel):
+    """Request model for workspace reset operations."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "workspace_id": "amazon_crawler",
+            }
+        }
+    )
+    workspace_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Workspace identifier to reset"
+    )
+
+
 # ==================== Response Schemas ====================
 
 class LeaseAcquireResponse(BaseModel):
@@ -153,6 +200,44 @@ class LeaseCooldownActionResponse(BaseModel):
     )
 
 
+class WorkspaceResetResponse(BaseModel):
+    """Response model for workspace reset operations."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "workspace_id": "amazon_crawler",
+                "released_count": 2,
+                "recalled_count": 3,
+            }
+        }
+    )
+    success: bool = True
+    workspace_id: str
+    released_count: int = Field(..., description="Number of active leases removed for the workspace")
+    recalled_count: int = Field(..., description="Number of cooldown records removed for the workspace")
+
+
+class LeaseTimedCooldownBatchResponse(BaseModel):
+    """Response model for applying timed cooldowns to multiple proxy ports."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "workspace_id": "amazon_crawler",
+                "cooldown_seconds": 300,
+                "applied_ports": [10001],
+                "skipped_ports": [10002],
+            }
+        }
+    )
+    success: bool = True
+    workspace_id: str
+    cooldown_seconds: int
+    applied_ports: List[int]
+    skipped_ports: List[int]
+
+
 class LeaseErrorResponse(BaseModel):
     """Response model for lease errors."""
     model_config = ConfigDict(
@@ -176,6 +261,7 @@ class ActiveLeaseInfo(BaseModel):
     lease_id: str
     workspace_id: str
     proxy_port: int
+    node_name: Optional[str] = None
     proxy_address: str
     proxy_scheme: str
     supported_proxy_protocols: List[str]
@@ -190,6 +276,7 @@ class CooldownInfo(BaseModel):
     """Information about a cooldown."""
     workspace_id: str
     proxy_port: int
+    node_name: Optional[str] = None
     until: Optional[datetime]
     set_at: datetime
     source: Literal["manual", "timed"]

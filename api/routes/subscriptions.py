@@ -12,9 +12,28 @@ from api.schemas.models import (
     SuccessResponse,
     ErrorResponse
 )
+from api.services.proxy_service import get_proxy_service
 from api.services.subscription_service import get_subscription_service
 
 router = APIRouter(prefix="/api/subscriptions", tags=["Subscriptions"])
+
+
+def _build_node_response(node: dict, proxy_port_by_node_id: dict[str, int]) -> NodeResponse:
+    proxy_port = proxy_port_by_node_id.get(str(node["id"]))
+    return NodeResponse(
+        id=node["id"],
+        subscription_id=node["subscription_id"],
+        name=node["name"],
+        protocol=node["protocol"],
+        address=node["address"],
+        port=node["port"],
+        test_status=node.get("test_status", "pending"),
+        latency_ms=node.get("latency_ms"),
+        exit_ip=node.get("exit_ip"),
+        exit_country=node.get("exit_country"),
+        in_proxy_pool=proxy_port is not None,
+        proxy_port=proxy_port,
+    )
 
 
 @router.get(
@@ -138,18 +157,11 @@ async def get_subscription_nodes(sub_id: str):
         )
     
     nodes = service.get_nodes_by_subscription(sub_id)
+    proxy_port_by_node_id = {
+        str(item["node_id"]): int(item["port"])
+        for item in get_proxy_service().get_all_proxies()
+    }
     return NodeListResponse(
-        nodes=[NodeResponse(
-            id=n["id"],
-            subscription_id=n["subscription_id"],
-            name=n["name"],
-            protocol=n["protocol"],
-            address=n["address"],
-            port=n["port"],
-            test_status=n.get("test_status", "pending"),
-            latency_ms=n.get("latency_ms"),
-            exit_ip=n.get("exit_ip"),
-            exit_country=n.get("exit_country")
-        ) for n in nodes],
+        nodes=[_build_node_response(n, proxy_port_by_node_id) for n in nodes],
         total=len(nodes)
     )

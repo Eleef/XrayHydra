@@ -8,12 +8,17 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import sys
 import time
+from datetime import datetime
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.xray_prism.models import ProxyNode, Protocol, NetworkType
+from src.xray_prism.models import (
+    ProxyNode,
+    Protocol,
+    NetworkType,
+)
 from src.xray_prism.generator import ConfigGenerator
 from src.xray_prism.runner import XrayRunner
 from src.xray_prism.tester import ProxyTester
@@ -25,6 +30,9 @@ logger = logging.getLogger(__name__)
 PROXY_BIND_HOST = "127.0.0.1"
 DEFAULT_PROXY_SCHEME = "http"
 SUPPORTED_PROXY_PROTOCOLS = ("http", "socks5")
+POOL_STATUS_ACTIVE = "active"
+POOL_STATUS_DEDUPE_DISABLED = "dedupe_disabled"
+DISABLED_REASON_EXIT_IP_DUPLICATE = "exit_ip_duplicate"
 
 
 def build_proxy_access_fields(port: int) -> Dict[str, object]:
@@ -77,6 +85,11 @@ class ProxyService:
                 self._data = json.load(f)
         else:
             self._data = {"proxies": [], "start_port": 10000}
+        proxies = self._data.get("proxies", [])
+        normalized = [self._normalize_proxy_record(proxy) for proxy in proxies]
+        if normalized != proxies:
+            self._data["proxies"] = normalized
+            self._save_data()
         return self._data
     
     def _save_data(self, data: Optional[Dict] = None):
@@ -86,10 +99,41 @@ class ProxyService:
         with open(self.PROXIES_FILE, 'w', encoding='utf-8') as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
 
+    def _get_runner(self) -> XrayRunner:
+        """Lazily create an Xray runner so service restarts can reclaim tracked processes."""
+        if self._runner is None:
+            self._runner = XrayRunner(project_dir=str(self.CONFIG_FILE.parent))
+        return self._runner
+
+    def _is_xray_running(self) -> bool:
+        """Check runtime status using either the in-memory process or tracked process metadata."""
+        return self._get_runner().is_running()
+
+    @staticmethod
+    def _normalize_proxy_record(proxy: Dict) -> Dict:
+        """Normalize persisted proxy fields added by newer versions."""
+        normalized = dict(proxy)
+        pool_status = str(normalized.get("pool_status") or POOL_STATUS_ACTIVE)
+        if pool_status not in {POOL_STATUS_ACTIVE, POOL_STATUS_DEDUPE_DISABLED}:
+            pool_status = POOL_STATUS_ACTIVE
+        normalized["pool_status"] = pool_status
+        normalized["disabled_reason"] = normalized.get("disabled_reason") if pool_status != POOL_STATUS_ACTIVE else None
+        normalized["disabled_at"] = normalized.get("disabled_at") if pool_status != POOL_STATUS_ACTIVE else None
+        return normalized
+
+    @staticmethod
+    def is_proxy_enabled(proxy: Dict) -> bool:
+        """Return whether a proxy should participate in runtime routing."""
+        return str(proxy.get("pool_status") or POOL_STATUS_ACTIVE) == POOL_STATUS_ACTIVE
+
     def _get_runtime_proxy_ports(self) -> List[int]:
         """Return ports that are actually routable by the current Xray process."""
-        if self._runner and self._runner.is_running():
-            return [p["port"] for p in self._data.get("proxies", [])]
+        if self._is_xray_running():
+            return [
+                p["port"]
+                for p in self._data.get("proxies", [])
+                if self.is_proxy_enabled(p)
+            ]
         return []
 
     def _sync_health_runtime_state(self, ensure_monitoring: bool = False) -> None:
@@ -111,22 +155,111 @@ class ProxyService:
         else:
             health_service.stop_monitoring()
     
-    def get_all_proxies(self) -> List[Dict]:
-        """Get all active proxies."""
+    def get_all_proxies(self, include_disabled: bool = True) -> List[Dict]:
+        """Get proxies in the pool, optionally excluding dedupe-disabled entries."""
         self._load_data()
-        return self._data.get("proxies", [])
+        proxies = self._data.get("proxies", [])
+        if include_disabled:
+            return [dict(proxy) for proxy in proxies]
+        return [dict(proxy) for proxy in proxies if self.is_proxy_enabled(proxy)]
     
     def get_xray_status(self) -> str:
         """Get current Xray status."""
-        if self._runner and self._runner.is_running():
+        if self._is_xray_running():
             return "running"
         return "stopped"
     
     def get_uptime(self) -> Optional[int]:
         """Get Xray uptime in seconds."""
-        if self._start_time and self._runner and self._runner.is_running():
+        if self._start_time and self._is_xray_running():
             return int(time.time() - self._start_time)
         return None
+
+    @staticmethod
+    def _proxy_dedupe_rank(proxy: Dict) -> tuple:
+        """Lower rank wins when keeping one proxy from the same exit IP group."""
+        status_rank = 0 if proxy.get("test_status") == "success" else 1
+        latency = proxy.get("latency_ms")
+        latency_rank = latency if isinstance(latency, (int, float)) else float("inf")
+        return (status_rank, latency_rank, int(proxy["port"]))
+
+    def get_exit_ip_duplicate_groups(self) -> List[Dict]:
+        """Preview duplicate proxies that share the same tested exit IP."""
+        groups: Dict[str, List[Dict]] = {}
+        for proxy in self.get_all_proxies(include_disabled=False):
+            exit_ip = str(proxy.get("exit_ip") or "").strip()
+            if not exit_ip:
+                continue
+            groups.setdefault(exit_ip, []).append(proxy)
+
+        duplicate_groups: List[Dict] = []
+        for exit_ip, proxies in groups.items():
+            if len(proxies) < 2:
+                continue
+            ordered = sorted(proxies, key=self._proxy_dedupe_rank)
+            keep_proxy = dict(ordered[0])
+            remove_proxies = [dict(item) for item in ordered[1:]]
+            duplicate_groups.append({
+                "exit_ip": exit_ip,
+                "keep_proxy": keep_proxy,
+                "remove_proxies": remove_proxies,
+            })
+
+        duplicate_groups.sort(key=lambda item: item["exit_ip"])
+        return duplicate_groups
+
+    def dedupe_proxies_by_exit_ip(self, disable_ports: List[int]) -> Dict:
+        """Disable duplicate proxies chosen by the user after previewing duplicate exit IP groups."""
+        self._load_data()
+        if not disable_ports:
+            raise ValueError("disable_ports cannot be empty")
+
+        duplicate_groups = self.get_exit_ip_duplicate_groups()
+        allowed_ports = {
+            int(proxy["port"])
+            for group in duplicate_groups
+            for proxy in group["remove_proxies"]
+        }
+        requested_ports = list(dict.fromkeys(int(port) for port in disable_ports))
+        invalid_ports = [port for port in requested_ports if port not in allowed_ports]
+        if invalid_ports:
+            raise ValueError(f"Invalid duplicate proxy ports: {invalid_ports}")
+
+        disabled = []
+        kept = []
+        kept_ports = set()
+        disabled_at = datetime.now().isoformat(timespec="seconds")
+
+        for proxy in self._data.get("proxies", []):
+            port = int(proxy["port"])
+            if port in requested_ports:
+                proxy["pool_status"] = POOL_STATUS_DEDUPE_DISABLED
+                proxy["disabled_reason"] = DISABLED_REASON_EXIT_IP_DUPLICATE
+                proxy["disabled_at"] = disabled_at
+                disabled.append(dict(proxy))
+
+        self._save_data()
+
+        if self._is_xray_running():
+            self._regenerate_and_restart()
+        else:
+            self._sync_health_runtime_state()
+
+        for group in duplicate_groups:
+            keep_proxy = group["keep_proxy"]
+            if any(int(item["port"]) in requested_ports for item in group["remove_proxies"]):
+                keep_port = int(keep_proxy["port"])
+                if keep_port not in kept_ports:
+                    kept.append(dict(keep_proxy))
+                    kept_ports.add(keep_port)
+
+        return {
+            "disabled_count": len(disabled),
+            "disabled_ports": [int(item["port"]) for item in disabled],
+            "kept_ports": sorted(kept_ports),
+            "disabled": disabled,
+            "kept": kept,
+        }
     
     def add_proxies(self, node_ids: List[str], start_port: int = 10000) -> List[Dict]:
         """Add nodes to the active proxy list."""
@@ -137,7 +270,7 @@ class ProxyService:
         
         if not nodes_data:
             raise ValueError("No valid nodes found")
-        
+
         # Calculate next available port
         existing_ports = {p["port"] for p in self._data.get("proxies", [])}
         current_port = start_port
@@ -147,7 +280,7 @@ class ProxyService:
             # Skip if node already in proxies
             if any(p["node_id"] == node["id"] for p in self._data.get("proxies", [])):
                 continue
-            
+
             # Find next available port
             while current_port in existing_ports:
                 current_port += 1
@@ -161,7 +294,10 @@ class ProxyService:
                 "server_port": node["port"],
                 "test_status": "pending",
                 "latency_ms": None,
-                "exit_ip": None
+                "exit_ip": None,
+                "pool_status": POOL_STATUS_ACTIVE,
+                "disabled_reason": None,
+                "disabled_at": None,
             }
             new_proxies.append(proxy)
             self._data["proxies"].append(proxy)
@@ -172,7 +308,7 @@ class ProxyService:
         self._save_data()
         
         # Regenerate config if Xray is running
-        if self._runner and self._runner.is_running():
+        if self._is_xray_running():
             self._regenerate_and_restart()
         else:
             self._sync_health_runtime_state()
@@ -193,7 +329,7 @@ class ProxyService:
             self._save_data()
             
             # Regenerate config if Xray is running
-            if self._runner and self._runner.is_running():
+            if self._is_xray_running():
                 self._regenerate_and_restart()
             else:
                 self._sync_health_runtime_state()
@@ -209,7 +345,7 @@ class ProxyService:
         self._save_data()
         
         # Stop Xray if running
-        if self._runner and self._runner.is_running():
+        if self._is_xray_running():
             self.stop_xray()
         else:
             self._sync_health_runtime_state()
@@ -223,6 +359,8 @@ class ProxyService:
         
         proxy_nodes = []
         for proxy in self._data.get("proxies", []):
+            if not self.is_proxy_enabled(proxy):
+                continue
             node_data = subscription_service.get_node(proxy["node_id"])
             if not node_data:
                 continue
@@ -274,42 +412,54 @@ class ProxyService:
     
     def _regenerate_and_restart(self):
         """Regenerate config and restart Xray."""
+        runner = self._get_runner()
+        enabled_proxies = self.get_all_proxies(include_disabled=False)
+
+        if not runner.is_running():
+            self._sync_health_runtime_state()
+            return
+
+        if not enabled_proxies:
+            runner.stop()
+            self._start_time = None
+            self._sync_health_runtime_state()
+            return
+
         config_path = self._regenerate_config()
-        if self._runner:
-            self._runner.stop()
-            time.sleep(0.5)
-            self._runner.start(config_path)
-            self._sync_health_runtime_state(ensure_monitoring=True)
+        runner.stop()
+        time.sleep(0.5)
+        runner.start(config_path)
+        self._start_time = time.time()
+        self._sync_health_runtime_state(ensure_monitoring=True)
     
     def start_xray(self) -> Dict:
         """Start the Xray process."""
-        if self._runner and self._runner.is_running():
+        if self._is_xray_running():
             return {"success": True, "message": "Xray is already running", "status": "running"}
         
         # Check if there are any proxies
         self._load_data()
-        if not self._data.get("proxies"):
+        if not self.get_all_proxies(include_disabled=False):
             self._sync_health_runtime_state()
-            return {"success": False, "message": "No proxies configured", "status": "stopped"}
+            return {"success": False, "message": "No enabled proxies configured", "status": "stopped"}
         
         # Generate config
         config_path = self._regenerate_config()
         
         # Initialize runner if needed
-        if not self._runner:
-            self._runner = XrayRunner()
+        runner = self._get_runner()
         
         # Try to find or download Xray
-        xray_path = self._runner.find_xray()
+        xray_path = runner.find_xray()
         if not xray_path:
             try:
-                self._runner.download_xray()
+                runner.download_xray()
             except Exception as e:
                 return {"success": False, "message": f"Failed to download Xray: {e}", "status": "stopped"}
         
         # Start Xray
         try:
-            self._runner.start(config_path)
+            runner.start(config_path)
             self._start_time = time.time()
             
             # Start health monitoring
@@ -326,7 +476,8 @@ class ProxyService:
     
     def stop_xray(self) -> Dict:
         """Stop the Xray process."""
-        if not self._runner or not self._runner.is_running():
+        runner = self._get_runner()
+        if not runner.is_running():
             self._start_time = None
             try:
                 self._sync_health_runtime_state()
@@ -335,7 +486,7 @@ class ProxyService:
             return {"success": True, "message": "Xray is not running", "status": "stopped"}
         
         try:
-            self._runner.stop()
+            runner.stop()
             self._start_time = None
             
             # Stop health monitoring
@@ -354,15 +505,25 @@ class ProxyService:
         time.sleep(0.5)
         return self.start_xray()
     
-    def test_all_proxies(self, timeout: int = 5, workers: int = 20) -> List[Dict]:
-        """Test all active proxies."""
+    def test_all_proxies(self, timeout: int = 5, workers: int = 20, attempts: int = 1) -> Dict[str, object]:
+        """Test all active proxies, optionally retrying each proxy multiple times."""
         self._load_data()
         
-        if not self._data.get("proxies"):
-            return []
+        active_proxies = [
+            proxy for proxy in self._data.get("proxies", [])
+            if self.is_proxy_enabled(proxy)
+        ]
+        if not active_proxies:
+            return {
+                "results": [],
+                "success_count": 0,
+                "failed_count": 0,
+                "attempts": max(1, attempts),
+                "cooldown_candidates": [],
+            }
         
         # Ensure Xray is running
-        if not self._runner or not self._runner.is_running():
+        if not self._is_xray_running():
             raise RuntimeError("Xray is not running. Please start Xray first.")
         
         # Build proxy nodes and port mappings for tester
@@ -375,37 +536,81 @@ class ProxyService:
             if local_port:
                 mappings.append(PortMapping(local_port=local_port, node=node))
         
-        # Run tests
         tester = ProxyTester(timeout=timeout, max_workers=workers)
-        results = tester.test_all(mappings)
-        
-        # Update proxy test results
+        attempts = max(1, attempts)
+        attempt_results = [tester.test_all(mappings) for _ in range(attempts)]
+
+        aggregated: Dict[int, Dict[str, object]] = {
+            proxy["port"]: {
+                "node_id": proxy["node_id"],
+                "name": proxy["node_name"],
+                "port": proxy["port"],
+                "failed_attempts": 0,
+                "success_result": None,
+                "last_error": None,
+            }
+            for proxy in active_proxies
+        }
+
+        for results in attempt_results:
+            for result in results:
+                item = aggregated.get(result.local_port)
+                if not item:
+                    continue
+                if result.success:
+                    item["success_result"] = result
+                else:
+                    item["failed_attempts"] = int(item["failed_attempts"]) + 1
+                    item["last_error"] = result.error
+
         test_results = []
-        for result in results:
-            for proxy in self._data["proxies"]:
-                if proxy["port"] == result.local_port:
-                    if result.success:
-                        proxy["test_status"] = "success"
-                        proxy["latency_ms"] = int(result.latency_ms) if result.latency_ms else None
-                        proxy["exit_ip"] = result.exit_ip
-                    else:
-                        proxy["test_status"] = "failed"
-                        proxy["latency_ms"] = None
-                        proxy["exit_ip"] = None
-                    
-                    test_results.append({
-                        "node_id": proxy["node_id"],
-                        "name": proxy["node_name"],
-                        "port": proxy["port"],
-                        "status": proxy["test_status"],
-                        "latency_ms": proxy["latency_ms"],
-                        "exit_ip": proxy["exit_ip"],
-                        "error": result.error
-                    })
-                    break
-        
+        cooldown_candidates = []
+        for proxy in active_proxies:
+            item = aggregated[proxy["port"]]
+            success_result = item["success_result"]
+            failed_attempts = int(item["failed_attempts"])
+
+            if success_result is not None:
+                proxy["test_status"] = "success"
+                proxy["latency_ms"] = int(success_result.latency_ms) if success_result.latency_ms else None
+                proxy["exit_ip"] = success_result.exit_ip
+                error = None
+            else:
+                proxy["test_status"] = "failed"
+                proxy["latency_ms"] = None
+                proxy["exit_ip"] = None
+                error = item["last_error"]
+
+            test_results.append({
+                "node_id": proxy["node_id"],
+                "name": proxy["node_name"],
+                "port": proxy["port"],
+                "status": proxy["test_status"],
+                "latency_ms": proxy["latency_ms"],
+                "exit_ip": proxy["exit_ip"],
+                "error": error,
+                "failed_attempts": failed_attempts,
+            })
+
+            if failed_attempts >= attempts and proxy["test_status"] == "failed":
+                cooldown_candidates.append({
+                    "node_id": proxy["node_id"],
+                    "name": proxy["node_name"],
+                    "proxy_port": proxy["port"],
+                    "failed_attempts": failed_attempts,
+                    "error": error,
+                })
+
         self._save_data()
-        return test_results
+        success_count = sum(1 for item in test_results if item["status"] == "success")
+        failed_count = len(test_results) - success_count
+        return {
+            "results": test_results,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "attempts": attempts,
+            "cooldown_candidates": cooldown_candidates,
+        }
     
     def test_single_proxy(self, port: int, timeout: int = 5) -> Optional[Dict]:
         """Test a single proxy by port."""
@@ -414,9 +619,11 @@ class ProxyService:
         proxy = next((p for p in self._data.get("proxies", []) if p["port"] == port), None)
         if not proxy:
             return None
+        if not self.is_proxy_enabled(proxy):
+            raise ValueError(f"Proxy on port {port} is dedupe-disabled")
         
         # Ensure Xray is running
-        if not self._runner or not self._runner.is_running():
+        if not self._is_xray_running():
             raise RuntimeError("Xray is not running. Please start Xray first.")
         
         tester = ProxyTester(timeout=timeout, max_workers=1)

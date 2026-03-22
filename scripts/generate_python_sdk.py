@@ -53,9 +53,39 @@ def schema_ref_name(schema: dict[str, Any] | None) -> str | None:
     return ref.rsplit("/", 1)[-1]
 
 
+def collect_schema_refs(schema: dict[str, Any] | None) -> set[str]:
+    if not schema:
+        return set()
+
+    refs: set[str] = set()
+    ref_name = schema_ref_name(schema)
+    if ref_name:
+        refs.add(ref_name)
+
+    for key in ("anyOf", "allOf", "oneOf"):
+        for item in schema.get(key, []):
+            refs.update(collect_schema_refs(item))
+
+    if schema.get("type") == "array":
+        refs.update(collect_schema_refs(schema.get("items")))
+
+    for prop_schema in (schema.get("properties") or {}).values():
+        refs.update(collect_schema_refs(prop_schema))
+
+    additional_properties = schema.get("additionalProperties")
+    if isinstance(additional_properties, dict):
+        refs.update(collect_schema_refs(additional_properties))
+
+    return refs
+
+
 def python_type(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
         return schema_ref_name(schema) or "Any"
+
+    if "enum" in schema:
+        values = ", ".join(repr(item) for item in schema["enum"])
+        return f"Literal[{values}]"
 
     if "anyOf" in schema:
         non_null = [item for item in schema["anyOf"] if item.get("type") != "null"]
@@ -71,9 +101,35 @@ def python_type(schema: dict[str, Any]) -> str:
     return TYPE_MAP.get(schema_type, "Any")
 
 
-def typed_dict_body(spec: dict[str, Any]) -> str:
+def qualified_python_type(schema: dict[str, Any] | None, model_prefix: str = "models.") -> str:
+    if not schema:
+        return "Any"
+
+    ref_name = schema_ref_name(schema)
+    if ref_name:
+        return f"{model_prefix}{ref_name}"
+
+    if "enum" in schema:
+        values = ", ".join(repr(item) for item in schema["enum"])
+        return f"Literal[{values}]"
+
+    if "anyOf" in schema:
+        non_null = [item for item in schema["anyOf"] if item.get("type") != "null"]
+        if len(non_null) == 1 and len(non_null) != len(schema["anyOf"]):
+            return f"{qualified_python_type(non_null[0], model_prefix)} | None"
+        return "Any"
+
+    schema_type = schema.get("type")
+    if schema_type == "array":
+        return f"list[{qualified_python_type(schema.get('items'), model_prefix)}]"
+    if schema_type == "object":
+        return "dict[str, Any]"
+    return TYPE_MAP.get(schema_type, "Any")
+
+
+def model_schema_names(spec: dict[str, Any]) -> list[str]:
     components = spec.get("components", {}).get("schemas", {})
-    request_names = {
+    names = {
         name for name in components
         if name.endswith("Request") or name.endswith("Update")
     }
@@ -86,20 +142,55 @@ def typed_dict_body(spec: dict[str, Any]) -> str:
             schema = request_body.get("content", {}).get("application/json", {}).get("schema")
             schema_name = schema_ref_name(schema)
             if schema_name:
-                request_names.add(schema_name)
+                names.add(schema_name)
 
-    request_names = sorted(request_names)
+            responses = operation.get("responses", {})
+            for status_code, response in responses.items():
+                if not str(status_code).startswith("2"):
+                    continue
+                response_schema = response.get("content", {}).get("application/json", {}).get("schema")
+                names.update(collect_schema_refs(response_schema))
+
+    pending = list(names)
+    while pending:
+        current = pending.pop()
+        schema = components.get(current)
+        if not isinstance(schema, dict):
+            continue
+        nested_refs = collect_schema_refs(schema)
+        new_refs = nested_refs - names
+        if new_refs:
+            names.update(new_refs)
+            pending.extend(new_refs)
+
+    return sorted(names)
+
+
+def success_response_schema(spec: dict[str, Any], operation: dict[str, Any]) -> dict[str, Any] | None:
+    responses = operation.get("responses", {})
+    for status_code, response in responses.items():
+        if not str(status_code).startswith("2"):
+            continue
+        schema = response.get("content", {}).get("application/json", {}).get("schema")
+        if schema:
+            return schema
+    return None
+
+
+def typed_dict_body(spec: dict[str, Any]) -> str:
+    components = spec.get("components", {}).get("schemas", {})
+    schema_names = model_schema_names(spec)
     lines: list[str] = [
-        '"""Typed request payloads generated from the OpenAPI schema."""',
+        '"""Typed API payloads generated from the OpenAPI schema."""',
         "",
         "from __future__ import annotations",
         "",
-        "from typing import Any",
+        "from typing import Any, Literal",
         "from typing_extensions import NotRequired, TypedDict",
         "",
     ]
 
-    for name in request_names:
+    for name in schema_names:
         schema = components[name]
         if schema.get("type") != "object":
             continue
@@ -232,6 +323,8 @@ def client_body(spec: dict[str, Any]) -> str:
             if request_body:
                 content = request_body.get("content", {}).get("application/json", {})
                 request_schema_name = schema_ref_name(content.get("schema"))
+            response_schema = success_response_schema(spec, operation)
+            return_type = qualified_python_type(response_schema)
 
             signature_parts = ["self"]
             format_args: list[str] = []
@@ -264,7 +357,7 @@ def client_body(spec: dict[str, Any]) -> str:
                 signature_parts.append(f"payload: models.{request_schema_name}")
 
             signature = ", ".join(signature_parts)
-            lines.append(f"    def {method_name}({signature}) -> Any:")
+            lines.append(f"    def {method_name}({signature}) -> {return_type}:")
             lines.append(f'        """{summary}."""')
             if description:
                 for raw_line in description.strip().splitlines():

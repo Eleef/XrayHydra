@@ -95,6 +95,40 @@ class TestProxyService(unittest.TestCase):
         mock_health_service.sync_with_proxies.assert_called_once_with([])
         mock_health_service.stop_monitoring.assert_called_once()
 
+    def test_get_xray_status_reclaims_tracked_process_after_service_restart(self):
+        """Status should report running when a project-owned Xray process is still alive after API restart."""
+        self.service._runner = None
+
+        mock_runner = MagicMock()
+        mock_runner.is_running.return_value = True
+
+        with patch("api.services.proxy_service.XrayRunner", return_value=mock_runner):
+            status = self.service.get_xray_status()
+
+        self.assertEqual(status, "running")
+        mock_runner.is_running.assert_called_once()
+
+    def test_stop_xray_stops_tracked_process_after_service_restart(self):
+        """Stop should terminate the tracked project-owned process even when no in-memory runner exists."""
+        self._write_proxies([
+            {"port": 10000, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443},
+        ])
+        self.service._load_data()
+        self.service._runner = None
+
+        mock_runner = MagicMock()
+        mock_runner.is_running.side_effect = [True, False]
+        mock_health_service = MagicMock()
+
+        with patch("api.services.proxy_service.XrayRunner", return_value=mock_runner), \
+             patch("api.services.proxy_service.get_health_service", return_value=mock_health_service):
+            result = self.service.stop_xray()
+
+        self.assertTrue(result["success"])
+        mock_runner.stop.assert_called_once()
+        mock_health_service.sync_with_proxies.assert_called_once_with([])
+        mock_health_service.stop_monitoring.assert_called_once()
+
     def test_regenerate_config_uses_socks_inbound_for_mixed_port_clients(self):
         """Generated config should expose socks inbound so one port supports socks5 and HTTP clients."""
         self._write_proxies([
@@ -121,6 +155,40 @@ class TestProxyService(unittest.TestCase):
         self.assertEqual(config["inbounds"][0]["protocol"], "socks")
         self.assertEqual(config["inbounds"][0]["port"], 10022)
         self.assertTrue(config["inbounds"][0]["settings"]["udp"])
+
+    def test_get_exit_ip_duplicate_groups_prefers_lowest_latency_success_proxy(self):
+        self._write_proxies([
+            {"port": 10000, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443, "test_status": "success", "latency_ms": 620, "exit_ip": "203.0.113.10"},
+            {"port": 10001, "node_id": "node_2", "node_name": "Node 2", "protocol": "trojan", "address": "b", "server_port": 443, "test_status": "success", "latency_ms": 410, "exit_ip": "203.0.113.10"},
+            {"port": 10002, "node_id": "node_3", "node_name": "Node 3", "protocol": "trojan", "address": "c", "server_port": 443, "test_status": "failed", "latency_ms": None, "exit_ip": None},
+        ])
+
+        groups = self.service.get_exit_ip_duplicate_groups()
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["exit_ip"], "203.0.113.10")
+        self.assertEqual(groups[0]["keep_proxy"]["port"], 10001)
+        self.assertEqual([item["port"] for item in groups[0]["remove_proxies"]], [10000])
+
+    def test_dedupe_proxies_by_exit_ip_disables_only_confirmed_ports(self):
+        self._write_proxies([
+            {"port": 10000, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443, "test_status": "success", "latency_ms": 620, "exit_ip": "203.0.113.10"},
+            {"port": 10001, "node_id": "node_2", "node_name": "Node 2", "protocol": "trojan", "address": "b", "server_port": 443, "test_status": "success", "latency_ms": 410, "exit_ip": "203.0.113.10"},
+            {"port": 10002, "node_id": "node_3", "node_name": "Node 3", "protocol": "trojan", "address": "c", "server_port": 443, "test_status": "success", "latency_ms": 390, "exit_ip": "198.51.100.8"},
+        ])
+
+        mock_health_service = MagicMock()
+        with patch("api.services.proxy_service.get_health_service", return_value=mock_health_service):
+            result = self.service.dedupe_proxies_by_exit_ip([10000])
+
+        self.assertEqual(result["disabled_count"], 1)
+        self.assertEqual(result["disabled_ports"], [10000])
+        self.assertEqual(result["kept_ports"], [10001])
+        self.assertEqual([item["port"] for item in self.service.get_all_proxies()], [10000, 10001, 10002])
+        self.assertEqual([item["port"] for item in self.service.get_all_proxies(include_disabled=False)], [10001, 10002])
+        disabled_proxy = next(item for item in self.service.get_all_proxies() if item["port"] == 10000)
+        self.assertEqual(disabled_proxy["pool_status"], "dedupe_disabled")
+        self.assertEqual(disabled_proxy["disabled_reason"], "exit_ip_duplicate")
 
 
 if __name__ == "__main__":

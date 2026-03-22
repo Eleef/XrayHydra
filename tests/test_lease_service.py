@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from api.services.lease_service import CooldownRecord, LeaseManager, LeaseRecord
+from api.services.lease_service import GLOBAL_WORKSPACE_ID, CooldownRecord, LeaseManager, LeaseRecord
 
 
 class TestLeaseManager(unittest.TestCase):
@@ -185,6 +185,48 @@ class TestLeaseManager(unittest.TestCase):
         self.assertFalse(success)
         self.assertIn("active lease", error)
 
+    def test_timed_cooldown_batch_skips_active_lease(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]):
+            self.manager.acquire("workspace_a", ttl=60)
+            result = self.manager.set_timed_cooldowns("workspace_a", [10001, 10002], 300)
+
+        self.assertEqual(result["applied_ports"], [10002])
+        self.assertEqual(result["skipped_ports"], [10001])
+        self.assertEqual(self.manager._cooldowns["workspace_a:10002"].source, "timed")
+
+    def test_global_timed_cooldown_blocks_acquire_for_all_workspaces(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
+            success, error = self.manager.set_timed_cooldown(GLOBAL_WORKSPACE_ID, 10001, 300)
+            result_a = self.manager.acquire("workspace_a", ttl=60)
+            result_b = self.manager.acquire("workspace_b", ttl=60)
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        self.assertFalse(result_a.success)
+        self.assertFalse(result_b.success)
+
+    def test_global_manual_cooldown_rejects_port_with_any_active_lease(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
+            self.manager.acquire("workspace_a", ttl=60)
+            success, error = self.manager.set_manual_cooldown(GLOBAL_WORKSPACE_ID, 10001)
+
+        self.assertFalse(success)
+        self.assertIn("active lease", error)
+
+    def test_recall_global_cooldown_restores_port_for_all_workspaces(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
+            self.manager.set_manual_cooldown(GLOBAL_WORKSPACE_ID, 10001)
+            success, source = self.manager.recall_cooldown(GLOBAL_WORKSPACE_ID, 10001)
+            result_a = self.manager.acquire("workspace_a", ttl=60)
+            result_b = self.manager.acquire("workspace_b", ttl=60)
+
+        self.assertTrue(success)
+        self.assertEqual(source, "manual")
+        self.assertTrue(result_a.success)
+        self.assertTrue(result_b.success)
+        self.assertEqual(result_a.proxy_port, 10001)
+        self.assertEqual(result_b.proxy_port, 10001)
+
     def test_lru_selection(self):
         manager = LeaseManager()
         now = datetime.now()
@@ -237,6 +279,37 @@ class TestLeaseManager(unittest.TestCase):
         status = self.manager.get_status(workspace_id="workspace_a")
         self.assertEqual(status["total_active"], 1)
         self.assertEqual({item["workspace_id"] for item in status["workspaces"]}, {"workspace_a", "workspace_b"})
+
+    def test_get_status_filtered_workspace_includes_global_cooldowns_but_not_global_summary(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]):
+            self.manager.set_manual_cooldown(GLOBAL_WORKSPACE_ID, 10001)
+            self.manager.set_manual_cooldown("workspace_a", 10002)
+
+        status = self.manager.get_status(workspace_id="workspace_a")
+
+        self.assertEqual(status["total_cooldowns"], 2)
+        self.assertEqual(
+            {(item["workspace_id"], item["proxy_port"]) for item in status["cooldowns"]},
+            {(GLOBAL_WORKSPACE_ID, 10001), ("workspace_a", 10002)},
+        )
+        self.assertEqual({item["workspace_id"] for item in status["workspaces"]}, {"workspace_a"})
+
+    def test_reset_workspace_clears_only_target_workspace_state(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]):
+            lease = self.manager.acquire("workspace_a", ttl=60)
+            self.manager.release("workspace_a", f"127.0.0.1:{lease.proxy_port}", cooldown_seconds=300)
+            other_lease = self.manager.acquire("workspace_b", ttl=60)
+            self.manager.release("workspace_b", f"127.0.0.1:{other_lease.proxy_port}", cooldown_seconds=120)
+
+        result = self.manager.reset_workspace("workspace_a")
+        status = self.manager.get_status()
+
+        self.assertEqual(result["workspace_id"], "workspace_a")
+        self.assertEqual(result["released_count"], 0)
+        self.assertEqual(result["recalled_count"], 1)
+        self.assertEqual({item["workspace_id"] for item in status["workspaces"]}, {"workspace_b"})
+        self.assertEqual(status["total_active"], 0)
+        self.assertEqual(status["total_cooldowns"], 1)
 
     def test_get_stats(self):
         with self._mock_healthy_ports():

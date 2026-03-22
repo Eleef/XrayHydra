@@ -56,6 +56,32 @@ def schema_ref_name(schema: dict[str, Any] | None) -> str | None:
     return ref.rsplit("/", 1)[-1]
 
 
+def collect_schema_refs(schema: dict[str, Any] | None) -> set[str]:
+    if not schema:
+        return set()
+
+    refs: set[str] = set()
+    ref_name = schema_ref_name(schema)
+    if ref_name:
+        refs.add(ref_name)
+
+    for key in ("anyOf", "allOf", "oneOf"):
+        for item in schema.get(key, []):
+            refs.update(collect_schema_refs(item))
+
+    if schema.get("type") == "array":
+        refs.update(collect_schema_refs(schema.get("items")))
+
+    for prop_schema in (schema.get("properties") or {}).values():
+        refs.update(collect_schema_refs(prop_schema))
+
+    additional_properties = schema.get("additionalProperties")
+    if isinstance(additional_properties, dict):
+        refs.update(collect_schema_refs(additional_properties))
+
+    return refs
+
+
 def ts_type(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
         return schema_ref_name(schema) or "unknown"
@@ -84,7 +110,39 @@ def ts_type(schema: dict[str, Any]) -> str:
     return TS_TYPE_MAP.get(schema_type, "unknown")
 
 
-def request_schema_names(spec: dict[str, Any]) -> list[str]:
+def qualified_ts_type(schema: dict[str, Any] | None, model_prefix: str = "models.") -> str:
+    if not schema:
+        return "any"
+
+    ref_name = schema_ref_name(schema)
+    if ref_name:
+        return f"{model_prefix}{ref_name}"
+
+    if "enum" in schema:
+        return " | ".join(json.dumps(item) for item in schema["enum"])
+
+    if "anyOf" in schema:
+        return " | ".join(qualified_ts_type(item, model_prefix) for item in schema["anyOf"])
+
+    schema_type = schema.get("type")
+    if schema_type == "array":
+        return f"Array<{qualified_ts_type(schema.get('items'), model_prefix)}>"
+
+    if schema_type == "object":
+        properties = schema.get("properties") or {}
+        if properties:
+            required = set(schema.get("required", []))
+            parts = []
+            for prop_name, prop_schema in properties.items():
+                optional = "" if prop_name in required else "?"
+                parts.append(f"{prop_name}{optional}: {qualified_ts_type(prop_schema, model_prefix)}")
+            return "{ " + "; ".join(parts) + " }"
+        return "Record<string, unknown>"
+
+    return TS_TYPE_MAP.get(schema_type, "unknown")
+
+
+def model_schema_names(spec: dict[str, Any]) -> list[str]:
     components = spec.get("components", {}).get("schemas", {})
     names = {
         name for name in components
@@ -101,15 +159,34 @@ def request_schema_names(spec: dict[str, Any]) -> list[str]:
             if schema_name:
                 names.add(schema_name)
 
+            responses = operation.get("responses", {})
+            for status_code, response in responses.items():
+                if not str(status_code).startswith("2"):
+                    continue
+                response_schema = response.get("content", {}).get("application/json", {}).get("schema")
+                names.update(collect_schema_refs(response_schema))
+
+    pending = list(names)
+    while pending:
+        current = pending.pop()
+        schema = components.get(current)
+        if not isinstance(schema, dict):
+            continue
+        nested_refs = collect_schema_refs(schema)
+        new_refs = nested_refs - names
+        if new_refs:
+            names.update(new_refs)
+            pending.extend(new_refs)
+
     return sorted(names)
 
 
 def model_body(spec: dict[str, Any]) -> str:
     components = spec.get("components", {}).get("schemas", {})
-    names = request_schema_names(spec)
+    names = model_schema_names(spec)
     lines = [
         "/* eslint-disable */",
-        "// Typed request payloads generated from the OpenAPI schema.",
+        "// Typed API payloads generated from the OpenAPI schema.",
         "",
     ]
 
@@ -128,6 +205,17 @@ def model_body(spec: dict[str, Any]) -> str:
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def success_response_schema(operation: dict[str, Any]) -> dict[str, Any] | None:
+    responses = operation.get("responses", {})
+    for status_code, response in responses.items():
+        if not str(status_code).startswith("2"):
+            continue
+        schema = response.get("content", {}).get("application/json", {}).get("schema")
+        if schema:
+            return schema
+    return None
 
 
 def client_body(spec: dict[str, Any]) -> str:
@@ -216,6 +304,8 @@ def client_body(spec: dict[str, Any]) -> str:
             request_schema = request_body.get("content", {}).get("application/json", {}).get("schema")
             request_schema_name = schema_ref_name(request_schema)
             requires_auth = bool(operation.get("security"))
+            response_schema = success_response_schema(operation)
+            return_type = qualified_ts_type(response_schema)
 
             signature_parts = []
             for param in path_params:
@@ -235,7 +325,7 @@ def client_body(spec: dict[str, Any]) -> str:
                 signature_parts.append(f"payload: models.{request_schema_name}")
 
             signature = ", ".join(signature_parts)
-            lines.append(f"  async {method_name}({signature}) {{")
+            lines.append(f"  async {method_name}({signature}): Promise<{return_type}> {{")
 
             path_literal = path
             for param in path_params:

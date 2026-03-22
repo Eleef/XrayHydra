@@ -59,6 +59,8 @@ data/                   # 数据存储目录（Phase 2）
 # Logs
 *.log
 logs/
+tmp_server_*.out
+tmp_server_*.err
 
 # Temporary files
 *.tmp

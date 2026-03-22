@@ -67,18 +67,27 @@ def get_xray_executable_name() -> str:
 class XrayRunner:
     """Xray 进程管理器"""
     
-    def __init__(self, xray_path: Optional[str] = None, project_dir: Optional[str] = None):
+    def __init__(
+        self,
+        xray_path: Optional[str] = None,
+        project_dir: Optional[str] = None,
+        process_info_file: Optional[str] = None,
+        track_process: bool = True,
+    ):
         """
         初始化 Xray 运行器
         
         Args:
             xray_path: 手动指定 xray 可执行文件路径
             project_dir: 项目目录，用于存放下载的 xray
+            process_info_file: 进程元数据文件路径（可选）
+            track_process: 是否启用跨进程元数据跟踪
         """
         self.project_dir = Path(project_dir) if project_dir else Path.cwd()
         self.xray_dir = self.project_dir / "bin"
         self.data_dir = self.project_dir / "data"
-        self.process_info_file = self.data_dir / "xray_runner.json"
+        self.track_process = track_process
+        self.process_info_file = Path(process_info_file) if process_info_file else (self.data_dir / "xray_runner.json")
         self._xray_path = xray_path
         self._process: Optional[subprocess.Popen] = None
 
@@ -94,6 +103,8 @@ class XrayRunner:
 
     def _read_process_metadata(self) -> Optional[dict]:
         """读取上次启动的 Xray 进程元数据。"""
+        if not self.track_process:
+            return None
         if not self.process_info_file.exists():
             return None
 
@@ -106,7 +117,9 @@ class XrayRunner:
 
     def _write_process_metadata(self, pid: int, xray_path: str, config_path: str) -> None:
         """保存当前启动的 Xray 进程元数据。"""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        if not self.track_process:
+            return
+        self.process_info_file.parent.mkdir(parents=True, exist_ok=True)
         metadata = {
             "pid": pid,
             "xray_path": str(Path(xray_path).resolve(strict=False)),
@@ -117,6 +130,8 @@ class XrayRunner:
 
     def _clear_process_metadata(self) -> None:
         """删除进程元数据文件。"""
+        if not self.track_process:
+            return
         try:
             if self.process_info_file.exists():
                 self.process_info_file.unlink()
@@ -233,6 +248,8 @@ class XrayRunner:
         只有当 PID 仍然存在，且可执行文件与记录一致时才会返回。
         在 Linux 下还会进一步比对 config 路径，降低误杀风险。
         """
+        if not self.track_process:
+            return None
         metadata = self._read_process_metadata()
         if not metadata:
             return None
