@@ -10,7 +10,14 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-from .models import ProxyNode, Protocol, NetworkType, PortMapping
+from .models import (
+    ProxyNode,
+    Protocol,
+    NetworkType,
+    PortMapping,
+    get_runtime_support_reason,
+    is_runtime_supported_protocol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +219,9 @@ class ConfigGenerator:
     
     def _node_to_outbound(self, node: ProxyNode, tag: str) -> Dict[str, Any]:
         """将 ProxyNode 转换为 Xray 出站配置"""
+        if not is_runtime_supported_protocol(node.protocol):
+            reason = get_runtime_support_reason(node.protocol) or f"不支持的协议: {node.protocol.value}"
+            raise ValueError(reason)
         
         if node.protocol == Protocol.VMESS:
             return self._vmess_outbound(node, tag)

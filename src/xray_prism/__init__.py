@@ -22,6 +22,7 @@ from .parser import (
     parse_vless,
     parse_shadowsocks,
     parse_trojan,
+    parse_ssr,
     parse_subscription,
     ParseError
 )
@@ -48,6 +49,7 @@ __all__ = [
     "parse_vless",
     "parse_shadowsocks",
     "parse_trojan",
+    "parse_ssr",
     "parse_subscription",
     "ParseError",
     # Generator

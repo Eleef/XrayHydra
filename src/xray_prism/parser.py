@@ -2,7 +2,7 @@
 """
 Xray-Prism 核心解析层
 
-负责解析 vmess/vless/ss/trojan 协议链接，转换为统一的 ProxyNode 对象。
+负责解析 vmess/vless/ss/trojan/ssr 协议链接，转换为统一的 ProxyNode 对象。
 """
 
 import base64
@@ -52,6 +52,19 @@ def _parse_network_type(net: str) -> NetworkType:
         "kcp": NetworkType.KCP,
     }
     return mapping.get(net, NetworkType.TCP)
+
+
+def _decode_optional_base64_param(value: Optional[str]) -> Optional[str]:
+    """Decode optional Base64-like params and fall back to URL decoding."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return _decode_base64(raw)
+    except Exception:
+        return unquote(raw)
 
 
 def parse_vmess(uri: str) -> ProxyNode:
@@ -350,6 +363,41 @@ def parse_trojan(uri: str) -> ProxyNode:
         raise ParseError(f"Trojan 解析失败: {e}")
 
 
+def parse_ssr(uri: str) -> ProxyNode:
+    """
+    解析 SSR 链接
+
+    格式: ssr://base64(server:port:protocol:method:obfs:base64(password)/?params)
+    """
+    try:
+        encoded = uri.replace("ssr://", "", 1).strip()
+        decoded = _decode_base64(encoded)
+        main_part, _, query = decoded.partition("/?")
+        match = re.match(
+            r"^(?P<address>.+?):(?P<port>\d+):(?P<ssr_protocol>[^:]+):(?P<method>[^:]+):(?P<obfs>[^:]+):(?P<password>.+)$",
+            main_part,
+        )
+        if not match:
+            raise ParseError("无法识别的 SSR 格式")
+
+        params = parse_qs(query, keep_blank_values=True)
+        name = _decode_optional_base64_param(params.get("remarks", [None])[0]) or "Unknown"
+
+        return ProxyNode(
+            name=name,
+            protocol=Protocol.SSR,
+            address=match.group("address"),
+            port=int(match.group("port")),
+            password=_decode_optional_base64_param(match.group("password")) or "",
+            security=match.group("method"),
+            network=NetworkType.TCP,
+        )
+    except ParseError:
+        raise
+    except Exception as e:
+        raise ParseError(f"SSR 解析失败: {e}")
+
+
 def parse_line(line: str) -> Optional[ProxyNode]:
     """
     解析单行链接
@@ -376,6 +424,8 @@ def parse_line(line: str) -> Optional[ProxyNode]:
             return parse_shadowsocks(line)
         elif line.startswith("trojan://"):
             return parse_trojan(line)
+        elif line.startswith("ssr://"):
+            return parse_ssr(line)
         else:
             logger.debug(f"不支持的协议: {line[:20]}...")
             return None

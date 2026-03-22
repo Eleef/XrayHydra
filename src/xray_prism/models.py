@@ -17,6 +17,31 @@ class Protocol(Enum):
     VLESS = "vless"
     SHADOWSOCKS = "shadowsocks"
     TROJAN = "trojan"
+    SSR = "ssr"
+
+
+RUNTIME_SUPPORTED_PROTOCOLS = frozenset({
+    Protocol.VMESS,
+    Protocol.VLESS,
+    Protocol.SHADOWSOCKS,
+    Protocol.TROJAN,
+})
+
+
+def is_runtime_supported_protocol(protocol: Protocol | str) -> bool:
+    """Return whether the current runtime can generate and run this protocol."""
+    normalized = protocol if isinstance(protocol, Protocol) else Protocol(str(protocol))
+    return normalized in RUNTIME_SUPPORTED_PROTOCOLS
+
+
+def get_runtime_support_reason(protocol: Protocol | str) -> Optional[str]:
+    """Return the runtime support note for a protocol, if any."""
+    normalized = protocol if isinstance(protocol, Protocol) else Protocol(str(protocol))
+    if is_runtime_supported_protocol(normalized):
+        return None
+    if normalized == Protocol.SSR:
+        return "当前 Xray 不支持 SSR（ShadowsocksR）协议"
+    return f"当前 Xray 运行链路未支持协议 {normalized.value}"
 
 
 class NetworkType(Enum):
@@ -75,7 +100,7 @@ class ProxyNode:
     # Reality 专用
     public_key: Optional[str] = None
     short_id: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """
         转换为字典格式，便于 JSON 序列化

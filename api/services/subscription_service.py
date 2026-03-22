@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.xray_prism.fetcher import fetch_subscription
 from src.xray_prism.parser import parse_subscription
-from src.xray_prism.models import ProxyNode
+from src.xray_prism.models import ProxyNode, is_runtime_supported_protocol
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,13 @@ class SubscriptionService:
                 self._data = json.load(f)
         else:
             self._data = {"subscriptions": {}, "nodes": {}}
+        normalized_nodes = {
+            node_id: self._normalize_node_record(node_data)
+            for node_id, node_data in self._data.get("nodes", {}).items()
+        }
+        if normalized_nodes != self._data.get("nodes", {}):
+            self._data["nodes"] = normalized_nodes
+            self._save_data()
         return self._data
     
     def _save_data(self, data: Optional[Dict] = None):
@@ -53,6 +60,13 @@ class SubscriptionService:
             self._data = data
         with open(self.SUBSCRIPTIONS_FILE, 'w', encoding='utf-8') as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2, default=str)
+
+    def _normalize_node_record(self, node_data: Dict) -> Dict:
+        """Normalize persisted node records."""
+        normalized = dict(node_data)
+        normalized.pop("runtime_supported", None)
+        normalized.pop("runtime_support_reason", None)
+        return normalized
     
     def get_all_subscriptions(self) -> List[Dict]:
         """Get all subscriptions."""
@@ -153,11 +167,41 @@ class SubscriptionService:
         content = fetch_subscription(url=url)
         if not content:
             raise ValueError("Failed to fetch subscription content")
-        
-        # Parse nodes
-        nodes: List[ProxyNode] = parse_subscription(content)
-        if not nodes:
+
+        parsed_nodes: List[ProxyNode] = parse_subscription(content)
+        if not parsed_nodes:
+            raw_nodes: List[ProxyNode] = parse_subscription(content, filter_nodes=False)
+            if raw_nodes:
+                detected_protocols = sorted({node.protocol.value for node in raw_nodes})
+                unsupported_protocols = sorted({
+                    node.protocol.value
+                    for node in raw_nodes
+                    if not is_runtime_supported_protocol(node.protocol)
+                })
+                if unsupported_protocols and set(unsupported_protocols) == set(detected_protocols):
+                    raise ValueError(
+                        f"订阅仅包含当前 Xray 不支持的协议: {', '.join(unsupported_protocols)}"
+                    )
+                raise ValueError("订阅仅包含元数据或当前不支持的节点")
             raise ValueError("No nodes found in subscription")
+
+        nodes = [node for node in parsed_nodes if is_runtime_supported_protocol(node.protocol)]
+        if not nodes:
+            unsupported_protocols = sorted({node.protocol.value for node in parsed_nodes})
+            raise ValueError(
+                f"订阅仅包含当前 Xray 不支持的协议: {', '.join(unsupported_protocols)}"
+            )
+        if len(nodes) < len(parsed_nodes):
+            ignored_protocols = sorted({
+                node.protocol.value
+                for node in parsed_nodes
+                if not is_runtime_supported_protocol(node.protocol)
+            })
+            logger.info(
+                "忽略订阅 %s 中当前 Xray 不支持的协议节点: %s",
+                sub_id,
+                ", ".join(ignored_protocols),
+            )
 
         nodes_data: Dict[str, Dict] = {}
         for idx, node in enumerate(nodes):

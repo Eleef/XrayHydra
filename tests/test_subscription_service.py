@@ -69,6 +69,57 @@ class TestSubscriptionService(unittest.TestCase):
         self.assertEqual(len(data["subscriptions"]), 1)
         self.assertEqual(len(data["nodes"]), 1)
 
+    def test_create_subscription_rejects_ssr_only_payload_with_clear_message(self):
+        """SSR-only subscriptions should fail with an unsupported-protocol message."""
+        ssr_node = ProxyNode(
+            name="SSR-demo",
+            protocol=Protocol.SSR,
+            address="ssr.example.com",
+            port=443,
+            password="secret",
+            security="aes-256-cfb",
+        )
+
+        with patch("api.services.subscription_service.fetch_subscription", return_value="ssr://demo"), \
+             patch("api.services.subscription_service.parse_subscription", side_effect=[[ssr_node], [ssr_node]]):
+            with self.assertRaises(ValueError) as exc:
+                self.service.create_subscription("ssr-only", "https://example.com/ssr")
+
+        self.assertIn("当前 Xray 不支持的协议", str(exc.exception))
+        self.assertIn("ssr", str(exc.exception))
+
+    def test_create_subscription_ignores_unsupported_nodes_when_runnable_nodes_exist(self):
+        """Mixed subscriptions should keep runnable nodes and drop unsupported ones."""
+        trojan_node = ProxyNode(
+            name="demo-node",
+            protocol=Protocol.TROJAN,
+            address="demo.example.com",
+            port=443,
+            password="secret",
+            tls=True,
+        )
+        ssr_node = ProxyNode(
+            name="SSR-demo",
+            protocol=Protocol.SSR,
+            address="ssr.example.com",
+            port=443,
+            password="secret",
+            security="aes-256-cfb",
+        )
+
+        with patch("api.services.subscription_service.fetch_subscription", return_value="mixed"), \
+             patch("api.services.subscription_service.parse_subscription", return_value=[trojan_node, ssr_node]):
+            result = self.service.create_subscription("mixed", "https://example.com/mixed")
+
+        self.assertEqual(result["node_count"], 1)
+
+        with open(self.service.SUBSCRIPTIONS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        stored_nodes = list(data["nodes"].values())
+        self.assertEqual(len(stored_nodes), 1)
+        self.assertEqual(stored_nodes[0]["protocol"], "trojan")
+
 
 if __name__ == "__main__":
     unittest.main()

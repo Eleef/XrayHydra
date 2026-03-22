@@ -26,6 +26,7 @@ class TestProtocolEnum:
         assert Protocol.VLESS.value == "vless"
         assert Protocol.SHADOWSOCKS.value == "shadowsocks"
         assert Protocol.TROJAN.value == "trojan"
+        assert Protocol.SSR.value == "ssr"
     
     def test_protocol_from_string(self):
         """测试从字符串创建枚举"""

@@ -1,6 +1,6 @@
 # **Xray-Prism Technical Architecture**
 
-Last Updated: 2026-03-07
+Last Updated: 2026-03-22
 
 ## **1. Overview (概述)**
 
@@ -88,7 +88,7 @@ graph TD
 ```python
 class ProxyNode:
     name: str           # 节点名称
-    protocol: Protocol  # vmess/vless/ss/trojan
+    protocol: Protocol  # vmess/vless/ss/trojan/ssr(仅用于识别)
     address: str        # 目标服务器 IP
     port: int           # 目标服务器端口
     uuid: str           # 身份凭证
@@ -104,3 +104,15 @@ class ProxyHealthState:
     penalty_level: int  # 当前罚时等级
     penalty_until: datetime # 罚时结束时间
 ```
+
+## **6. Protocol Recognition vs Runtime Support**
+
+解析层当前可以识别 `vmess`、`vless`、`shadowsocks`、`trojan` 和 `ssr`。但运行层仍只接受 `RUNTIME_SUPPORTED_PROTOCOLS` 中的协议，也就是 `vmess/vless/shadowsocks/trojan`。
+
+这意味着“能识别订阅内容”和“能被当前 Xray 运行”是两个不同阶段。`ssr://` 会被识别出来，用于给用户返回准确错误，而不会再被误判成“空订阅”。
+
+## **7. SSR Handling**
+
+当订阅只包含 SSR 节点时，创建或刷新订阅会直接返回明确错误：`订阅仅包含当前 Xray 不支持的协议: ssr`。
+
+当订阅同时包含可运行协议和 SSR 时，系统只导入可运行节点，忽略 SSR 节点，并记录一条日志说明哪些协议被跳过。这样代理池、节点测试和 Xray 配置始终只处理当前真正可运行的节点。

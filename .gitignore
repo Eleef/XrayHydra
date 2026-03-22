@@ -46,15 +46,15 @@ htmlcov/
 .tox/
 
 # Xray-Prism specific
-bin/*.exe               # Xray 可执行文件
-bin/*.dat               # GeoIP/GeoSite 数据文件
-!bin/README.md          # 保留说明文档
-!bin/LICENSE            # 保留许可证
-sdk/python/openapi.json # 按需导出的 OpenAPI 文件，不纳入仓库
-config.json             # 生成的配置文件
-proxies.txt             # 生成的代理列表
-subscription_sample.txt # 订阅样本（可选保留）
-data/                   # 数据存储目录（Phase 2）
+bin/*.exe
+bin/*.dat
+!bin/README.md
+!bin/LICENSE
+sdk/python/openapi.json
+config.json
+proxies.txt
+subscription_sample.txt
+data/
 
 # Logs
 *.log
