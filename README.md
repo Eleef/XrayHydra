@@ -1,197 +1,74 @@
-# Xray-Prism 🌐
+# Xray-Prism
 
-将 VPN 订阅中的每个节点映射为本地独立端口，实现并发使用不同 IP。内置强大的健康监测系统与代理租约管理 API，专为自动化采集与多任务并发场景设计。
+中文：把订阅里的“每个节点”映射为本地独立端口，支持批量测试、代理池管理与租约分配，面向多任务并发与自动化采集场景。
 
-## 🌟 功能特性
+English: Map each subscription node to its own local port. Includes batch testing, proxy-pool management, and a lease API for multi-workspace automation.
 
-- 🧪 **全协议支持**: 完美解析 VMess / VLess / Shadowsocks / Trojan 协议（含 Clash YAML 格式）。
-- 🏗️ **端口映射**: 每个节点映射为独立本地端口，路由 1 对 1 硬绑定，真正实现多 IP 并发。
-- 🏥 **自动健康监测**: 
-  - 实时连通性探测，自动剔除失效节点。
-  - **递进式罚时**: 5min → 30min → 150min，确保资源高效利用。
-  - 网络中断容错，避免误判。
-- 🔑 **代理租约 API (v0.5.0)**:
-  - **Workspace 隔离**: 不同业务域可同时使用同一代理，互不干扰。
-  - **TTL 机制**: 租约自动过期，防止调用方崩溃导致资源僵死。
-  - **客户端冷却**: 支持自定义回收后的冷却时间，精细控制使用频率。
-  - **手动冷却 / 召回**: Web UI 和 OpenAPI 均支持按 workspace 手动冷却代理，并在需要时召回。
-  - **测试失败候选冷却**: 手动点击“测试全部”时，可按当前 workspace 或“所有代理（全局冷却）”配置“连续失败 N 次后加入冷却池”，并在确认弹窗中二次确认后才真正加入定时冷却。
-  - **LRU 负载均衡**: 智能分配最久未使用的代理端口。
-- 🔀 **Mixed-Port 本地代理**: 每个本地端口由 Xray `socks` inbound 提供，客户端可对同一端口使用 `http://` 或 `socks5://`。
-- 🪟🐧 **跨平台进程管理**: Windows / Linux 下都只回收本项目启动的 Xray 进程，不会全局误杀同机其他实例。
-- 1️⃣ **Web 服务端口冲突检测**: 启动前会检查目标 `host:port` 是否可绑定，避免重复占用同一端口时才在运行阶段报错。
-- 🎨 **现代化 UI**: 简约明亮的浅色三栏式布局，代理栏更宽，并支持 workspace 视角下的租约与冷却管理。
-- ⚙️ **环境隔离**: 支持 `.env` 配置，支持 Bearer Token API 认证。
+## 功能概览 / Features
 
-## 🚀 快速开始
+- 节点组 / Node groups: 左侧统一展示 `订阅组` 与 `自定义组`（自定义组为连接快照，支持粘贴批量导入、重命名、删除与组内单节点移除）。
+- 先测后加 / Test before adding: 单节点测试 + 批量测试；批量测试走后端任务并返回真实进度，测试成功节点可一键加入代理池。
+- 复制到分组 / Copy to group: 工具栏 `加入到分组` 作用于当前可见且可操作的勾选节点；已入池或勾选禁用节点可用行内 `复制到分组` 单独复制。
+- Mixed-Port 本地代理 / Mixed-port local proxy: 每个本地端口同时支持 HTTP 与 SOCKS5（以 API 返回的 `http_proxy_url` / `socks5_proxy_url` 为准）。
+- 出口 IP 去重（禁用不删除）/ Exit-IP dedupe (disable, not delete): 手动预览重复项并确认后，将重复代理标记为去重禁用，避免节点侧再次被重复加入。
+- 租约 API / Lease API: 按 workspace 隔离、TTL 过期、可选冷却与手动召回；可配置 `LEASE_API_TOKEN` 启用 Bearer 鉴权。
+- Xray 内核 / Xray core: 支持自动下载 Xray-core 到 `bin/`，也可手动指定已安装的 `xray` 可执行文件。
 
-### 1. 安装依赖
+## 协议支持 / Protocol Support
 
-```bash
-python -m venv .venv
+- 可运行协议 / Runtime-supported: `vmess` / `vless` / `shadowsocks` / `trojan`（支持 Clash YAML）。
+- `ssr://`：会被识别用于清晰报错，但不会导入运行（Xray 不支持 SSR 出站）。
 
-# Windows
-.venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+## 快速开始 / Quick Start
 
-# Linux / macOS
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+### Windows
 
-### 2. 环境配置
+直接运行一键脚本：
 
-直接编辑根目录下的 `.env` 文件进行配置：
-```env
-LEASE_API_TOKEN=your_secret_token
-PORT=8000
-```
-在 `.env` 中你可以配置：
-- `LEASE_API_TOKEN`: 启用租约 API 的认证 Token
-- `HOST` / `PORT`: Web 服务器启动参数
-
-### 3. 运行项目
-
-**Web 管理界面（推荐）：**
-```bash
-# Windows
-.venv\Scripts\python.exe server.py
-
-# Linux / macOS
-source .venv/bin/activate
-python server.py
-```
-- 一键启动脚本：
-```bash
-# Windows（支持双击或命令行执行）
+```powershell
 start_windows.bat
+```
 
-# Linux
+### Linux
+
+```bash
 chmod +x start_linux.sh
 ./start_linux.sh
 ```
-- 这两个脚本会自动复用仓库内 `.venv`；如果 `.venv` 不存在，会自动创建并安装 `requirements.txt`。
-- 访问地址: `http://localhost:8000/`
-- API 文档: `http://localhost:8000/docs`
-- OpenAPI JSON: `http://localhost:8000/openapi.json`
 
-**命令行模式：**
-```bash
-# 获取并测试订阅节点
-.venv\Scripts\python.exe main.py --url "YOUR_SUBSCRIPTION_URL" --test --keep-running
+打开 / Open: `http://127.0.0.1:8000/`
+
+API Docs: `http://127.0.0.1:8000/docs`
+
+## 配置 / Configuration
+
+可选使用 `.env`：
+
+```env
+HOST=127.0.0.1
+PORT=8000
+LEASE_API_TOKEN=your_secret_token
 ```
 
-### 4. 测试
+`LEASE_API_TOKEN` 为空时，租约 API 默认不启用认证。
 
-```bash
-# 推荐：单元测试（不依赖本地已启动服务）
-.venv\Scripts\python.exe -m pytest tests/test_models.py tests/test_fetcher.py tests/test_lease_service.py tests/test_runner.py tests/test_subscription_service.py tests/test_proxy_service.py -q
+## 开发与测试 / Development
 
-# 集成脚本：需要先启动 Web 服务，并准备可用代理
-.venv\Scripts\python.exe tests/test_lease_client.py
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pytest -q
 ```
 
-### 5. Python / TypeScript SDK
+重新生成 SDK：
 
-项目已基于 `openapi.json` 生成 Python / TypeScript SDK，目录分别位于 `sdk/python` 与 `sdk/typescript`。
-
-它的主要用途：
-- 让 Python 调用方直接用类型化方法访问 API，而不是手写 `requests/httpx` 和 URL。
-- 把服务端 OpenAPI 契约复用到客户端，减少字段名、鉴权头、请求结构漂移。
-- 让前端工具、Node.js 脚本或其他 TypeScript 客户端也能直接复用同一份契约。
-- 后续接口变更时，可以通过重新生成 SDK 同步给爬虫、调度器或外部业务系统。
-
-```bash
-# 重新生成 SDK
-.venv\Scripts\python.exe scripts/generate_python_sdk.py
-
-# 重新生成 TypeScript SDK
-.venv\Scripts\python.exe scripts/generate_typescript_sdk.py
-
-# 如需额外导出 OpenAPI 文件（默认不落盘，避免大 JSON 进入仓库）
-.venv\Scripts\python.exe scripts/generate_python_sdk.py --write-openapi .\tmp\openapi.json
-
-# 安装本地 SDK（开发模式）
-.venv\Scripts\python.exe -m pip install -e .\sdk\python
+```powershell
+.venv\Scripts\python.exe scripts\generate_python_sdk.py
+.venv\Scripts\python.exe scripts\generate_typescript_sdk.py
 ```
 
-更多使用说明见 `sdk/python/README.md` 和 `sdk/typescript/README.md`。
+## 隐私与公开仓库 / Privacy & Public Repos
 
-## 📌 行为说明
-
-- 添加订阅时，如果订阅抓取或解析失败，API 会直接返回错误，不再创建“空订阅”记录。
-- 代理健康状态只反映当前 Xray 实际可路由的端口；Xray 停止后会清空对应健康状态，避免租约系统分配失效端口。
-- 客户端接口基于 FastAPI 生成标准 OpenAPI，包含稳定 `operationId`、请求示例和 Lease API 的标准 Bearer 安全方案声明。
-- Python 客户端 SDK 已由 OpenAPI 契约生成，适合内部自动化脚本、测试工具和外部业务接入。
-- TypeScript SDK 已由同一份 OpenAPI 契约生成，适合浏览器端控制台、Node.js 自动化和其他 TS 客户端接入。
-- 本地代理端口采用 Xray `socks` inbound，以单端口 mixed-port 方式同时兼容 HTTP 和 SOCKS5 客户端；新客户端应优先使用接口返回的 `http_proxy_url` / `socks5_proxy_url`，不要只拿 `host:port` 自行猜协议。
-- Web 前端右侧代理栏现在基于当前 workspace 展示租约与冷却状态，并支持对可用代理手动冷却、对冷却代理手动召回。
-- 顶部范围选择器包含一个固定的“所有代理”视图：它会聚合当前全部代理对应的租约和冷却状态，并允许在“测试全部”后把失败代理加入全局冷却池。
-- 在具体 workspace 视图下，代理栏可做手动冷却/召回；在租约的冷却池列表中，也可直接对单条冷却记录执行召回。
-- 手动点击“测试全部”时，可选启用“失败后加入冷却池”：可选择当前 workspace，或直接在未激活 workspace / “所有代理”视图下走全局冷却；再配置测试次数和冷却秒数。测试结束后会弹出候选失败清单，只有确认后才会真正加入对应冷却池。
-- `server.py` 现在会在启动前先检查目标端口是否已被占用；如果冲突，会直接提示当前地址不可用，并建议换端口或先停止占用进程。
-
-## 🔌 代理租约 API 使用示例
-
-代理租约 API 是专为自动化爬虫/脚本设计的接口，确保不同任务不会抢占同一个代理。
-
-### 申请代理
-```bash
-curl -X POST http://localhost:8000/api/lease/acquire \
-  -H "Content-Type: application/json" \
-  -d '{"workspace_id": "amazon_crawler", "ttl": 60}'
-```
-
-典型返回：
-```json
-{
-  "success": true,
-  "lease_id": "uuid",
-  "proxy_address": "127.0.0.1:10022",
-  "proxy_scheme": "http",
-  "supported_proxy_protocols": ["http", "socks5"],
-  "http_proxy_url": "http://127.0.0.1:10022",
-  "socks5_proxy_url": "socks5://127.0.0.1:10022",
-  "socks5h_proxy_url": "socks5h://127.0.0.1:10022",
-  "expires_at": "2026-03-07T03:10:00"
-}
-```
-
-### 归还代理（带 5 分钟冷却）
-```bash
-curl -X POST http://localhost:8000/api/lease/release \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_id": "amazon_crawler", 
-    "proxy_address": "127.0.0.1:10001", 
-    "cooldown_seconds": 300
-  }'
-```
-
-## 🛠️ 项目结构
-
-```
-XrayHydra/
-├── server.py            # Web 服务入口（支持 .env）
-├── main.py              # CLI 核心逻辑
-├── .env                 # 环境配置文件
-├── api/                 # Web API 层
-│   ├── routes/          # 路由 (lease, health, proxies, ...)
-│   ├── services/        # 业务逻辑 (lease_service, health_service, ...)
-│   └── schemas/         # Pydantic 模型
-├── src/xray_prism/      # 核心逻辑模块
-│   ├── health_monitor.py# 健康监测核心
-│   ├── runner.py        # Xray 进程管理
-│   └── ...
-├── web/                 # 前端 (HTML/JS/CSS)
-└── tests/               # 完整的测试组件 (Unit/Integration/Demo)
-```
-
-## 📦 依赖项
-
-- Python 3.10+
-- `fastapi`, `uvicorn`, `pydantic` - 高性能 Web 框架
-- `python-dotenv` - 环境配置管理
-- `requests`, `pyyaml` - 网络与数据解析
-- `Xray-core` - 自动下载管理
+- 订阅链接与运行态数据会落在 `data/` 下，默认被 `.gitignore` 忽略，不应提交到仓库。
+- `.env` 默认被忽略，不应提交到仓库。
+- 不要把任何真实订阅 URL、节点地址或凭据写进示例文件；样例请使用占位符域名与占位符密码。
