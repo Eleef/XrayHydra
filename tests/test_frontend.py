@@ -39,7 +39,13 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn('id="modal-exit-ip-dedupe-review"', body)
         self.assertIn('id="modal-create-group-entry"', body)
         self.assertIn('id="modal-add-custom-group"', body)
+        self.assertIn('id="modal-rename-custom-group"', body)
+        self.assertIn('id="modal-delete-custom-group"', body)
+        self.assertIn('id="modal-remove-node-from-group"', body)
         self.assertIn('id="modal-copy-to-group"', body)
+        self.assertIn('id="modal-rename-custom-group"', body)
+        self.assertIn('id="modal-delete-custom-group"', body)
+        self.assertIn('id="modal-remove-node-from-group"', body)
 
     def test_docs_track_keyword_counts_and_progress(self):
         with open("docs/product/frontend_spec.md", encoding="utf-8") as spec:
@@ -60,6 +66,7 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn("去重禁用", guide_text)
         self.assertIn("节点组", guide_text)
         self.assertIn("加入到分组", guide_text)
+        self.assertIn("复制到分组", guide_text)
 
     def test_docs_describe_progress_polling_fields(self):
         with open("docs/product/frontend_spec.md", encoding="utf-8") as spec:

@@ -235,7 +235,10 @@ class CustomGroupService:
                 "created_at": group_data.get("created_at"),
                 "updated_at": group_data.get("updated_at"),
             })
-        groups.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        groups.sort(
+            key=lambda item: item.get("updated_at") or item.get("created_at") or "",
+            reverse=True,
+        )
         return groups
 
     def get_group(self, group_id: str) -> Optional[Dict]:

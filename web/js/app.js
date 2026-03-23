@@ -61,6 +61,12 @@ class App {
         this.currentWorkspaceId = localStorage.getItem('xray-prism.currentWorkspaceId') || null;
         this.pendingTestCooldownReview = null;
         this.pendingExitIpDedupeReview = null;
+        this.pendingCustomGroupTargetId = null;
+        this.pendingCustomGroupTargetName = '';
+        this.pendingCopyNodeIds = [];
+        this.pendingRenameGroupId = null;
+        this.pendingDeleteGroupId = null;
+        this.pendingRemoveNodeId = null;
 
         // DOM Elements
         this.elements = {
@@ -112,11 +118,26 @@ class App {
             btnOpenAddSubscription: document.getElementById('btn-open-add-subscription'),
             btnOpenAddCustomGroup: document.getElementById('btn-open-add-custom-group'),
             modalAddCustomGroup: document.getElementById('modal-add-custom-group'),
+            customGroupModalTitle: document.getElementById('custom-group-modal-title'),
+            customGroupSubmitText: document.getElementById('custom-group-submit-text'),
+            customGroupNameRow: document.getElementById('custom-group-name-row'),
+            customGroupModeRow: document.getElementById('custom-group-mode-row'),
             customGroupName: document.getElementById('custom-group-name'),
             customGroupImportMode: document.getElementById('custom-group-import-mode'),
             customGroupContentWrap: document.getElementById('custom-group-content-wrap'),
             customGroupContent: document.getElementById('custom-group-content'),
             btnConfirmAddCustomGroup: document.getElementById('btn-confirm-add-custom-group'),
+            customGroupTargetRow: document.getElementById('custom-group-target-row'),
+            customGroupTargetName: document.getElementById('custom-group-target-name'),
+            modalRenameCustomGroup: document.getElementById('modal-rename-custom-group'),
+            renameCustomGroupName: document.getElementById('rename-custom-group-name'),
+            btnConfirmRenameCustomGroup: document.getElementById('btn-confirm-rename-custom-group'),
+            modalDeleteCustomGroup: document.getElementById('modal-delete-custom-group'),
+            deleteCustomGroupName: document.getElementById('delete-custom-group-name'),
+            btnConfirmDeleteCustomGroup: document.getElementById('btn-confirm-delete-custom-group'),
+            modalRemoveNodeFromGroup: document.getElementById('modal-remove-node-from-group'),
+            removeNodeName: document.getElementById('remove-node-name'),
+            btnConfirmRemoveNodeFromGroup: document.getElementById('btn-confirm-remove-node-from-group'),
             modalCopyToGroup: document.getElementById('modal-copy-to-group'),
             copyGroupSelect: document.getElementById('copy-group-select'),
             copyGroupNewName: document.getElementById('copy-group-new-name'),
@@ -216,6 +237,9 @@ class App {
         this.elements.customGroupImportMode?.addEventListener('change', () => this.handleCustomGroupImportModeChange());
         this.elements.btnConfirmAddCustomGroup?.addEventListener('click', () => this.confirmAddCustomGroup());
         this.elements.btnConfirmCopyToGroup?.addEventListener('click', () => this.confirmCopyToGroup());
+        this.elements.btnConfirmRenameCustomGroup?.addEventListener('click', () => this.confirmRenameCustomGroup());
+        this.elements.btnConfirmDeleteCustomGroup?.addEventListener('click', () => this.confirmDeleteCustomGroup());
+        this.elements.btnConfirmRemoveNodeFromGroup?.addEventListener('click', () => this.confirmRemoveNodeFromGroup());
         document.querySelectorAll('[data-close-modal]').forEach(btn => {
             btn.addEventListener('click', () => this.closeModals());
         });
@@ -231,6 +255,21 @@ class App {
         });
         this.elements.modalAddCustomGroup?.addEventListener('click', (e) => {
             if (e.target === this.elements.modalAddCustomGroup) {
+                this.closeModals();
+            }
+        });
+        this.elements.modalRenameCustomGroup?.addEventListener('click', (e) => {
+            if (e.target === this.elements.modalRenameCustomGroup) {
+                this.closeModals();
+            }
+        });
+        this.elements.modalDeleteCustomGroup?.addEventListener('click', (e) => {
+            if (e.target === this.elements.modalDeleteCustomGroup) {
+                this.closeModals();
+            }
+        });
+        this.elements.modalRemoveNodeFromGroup?.addEventListener('click', (e) => {
+            if (e.target === this.elements.modalRemoveNodeFromGroup) {
                 this.closeModals();
             }
         });
@@ -307,6 +346,11 @@ class App {
         return this.groups.find((item) => item.group_type === groupType && item.id === id) || null;
     }
 
+    getGroupUpdatedAt(group) {
+        if (!group) return '';
+        return group.updated_at || group.last_updated || group.created_at || '';
+    }
+
     async loadSubscriptions() {
         try {
             const [subscriptionData, customGroupData] = await Promise.all([
@@ -319,6 +363,7 @@ class App {
                 ...this.subscriptions.map((item) => ({ ...item, group_type: 'subscription' })),
                 ...this.customGroups.map((item) => ({ ...item, group_type: 'custom' })),
             ];
+            this.groups.sort((a, b) => this.getGroupUpdatedAt(b).localeCompare(this.getGroupUpdatedAt(a)));
             this.renderSubscriptions();
             await this.restoreSubscriptionSelection();
         } catch (error) {
@@ -380,18 +425,23 @@ class App {
         const action = e.target.closest('[data-action]')?.dataset.action;
         const groupId = item.dataset.id;
         const groupType = item.dataset.groupType || 'subscription';
+        const group = this.groups.find((entry) => entry.group_type === groupType && entry.id === groupId);
 
         if (action === 'refresh' && groupType === 'subscription') {
             await this.refreshSubscription(groupId);
             return;
         }
+        if (action === 'import' && groupType === 'custom' && group) {
+            this.openCustomGroupModal({ targetGroupId: groupId, targetGroupName: group.name });
+            return;
+        }
         if (action === 'rename' && groupType === 'custom') {
-            await this.renameCustomGroup(groupId);
+            this.openRenameCustomGroupModal(groupId);
             return;
         }
         if (action === 'delete') {
             if (groupType === 'custom') {
-                await this.deleteCustomGroup(groupId);
+                this.openDeleteCustomGroupModal(groupId);
             } else {
                 await this.deleteSubscription(groupId);
             }
@@ -490,45 +540,101 @@ class App {
     }
 
     openAddCustomGroupModal() {
-        if (this.elements.customGroupName) this.elements.customGroupName.value = '';
-        if (this.elements.customGroupImportMode) this.elements.customGroupImportMode.value = 'none';
-        if (this.elements.customGroupContent) this.elements.customGroupContent.value = '';
+        this.openCustomGroupModal({ targetGroupId: null, importMode: 'none' });
+    }
+
+    openCustomGroupModal({ targetGroupId = null, targetGroupName = '', importMode = 'none' } = {}) {
+        this.pendingCustomGroupTargetId = targetGroupId;
+        this.pendingCustomGroupTargetName = targetGroupName;
+        const isImportIntoExisting = Boolean(targetGroupId);
+        if (this.elements.customGroupModalTitle) {
+            this.elements.customGroupModalTitle.textContent = isImportIntoExisting ? '导入到自定义组' : '新建自定义组';
+        }
+        if (targetGroupId) {
+            this.elements.customGroupNameRow?.classList.add('hidden');
+            this.elements.customGroupModeRow?.classList.add('hidden');
+            this.elements.customGroupTargetRow?.classList.remove('hidden');
+            if (this.elements.customGroupTargetName) {
+                this.elements.customGroupTargetName.textContent = targetGroupName || '-';
+            }
+        } else {
+            this.elements.customGroupNameRow?.classList.remove('hidden');
+            this.elements.customGroupModeRow?.classList.remove('hidden');
+            this.elements.customGroupTargetRow?.classList.add('hidden');
+        }
+        if (this.elements.customGroupName && !targetGroupId) {
+            this.elements.customGroupName.value = '';
+        }
+        if (this.elements.customGroupContent) {
+            this.elements.customGroupContent.value = '';
+        }
+        if (this.elements.customGroupImportMode) {
+            this.elements.customGroupImportMode.value = targetGroupId ? 'paste' : (importMode || 'none');
+        }
         this.handleCustomGroupImportModeChange();
         this.elements.modalCreateGroupEntry?.classList.remove('active');
         this.elements.modalAddCustomGroup?.classList.add('active');
-        this.elements.customGroupName?.focus();
+        if (!targetGroupId) {
+            this.elements.customGroupName?.focus();
+        } else {
+            this.elements.customGroupContent?.focus();
+        }
     }
 
     handleCustomGroupImportModeChange() {
         if (!this.elements.customGroupImportMode || !this.elements.customGroupContentWrap) return;
         const mode = this.elements.customGroupImportMode.value;
         this.elements.customGroupContentWrap.classList.toggle('hidden', mode !== 'paste');
+        if (this.elements.customGroupSubmitText) {
+            this.elements.customGroupSubmitText.textContent = this.pendingCustomGroupTargetId
+                ? '导入节点'
+                : (mode === 'paste' ? '创建并导入' : '创建分组');
+        }
     }
 
     async confirmAddCustomGroup() {
-        const name = (this.elements.customGroupName?.value || '').trim();
-        const mode = this.elements.customGroupImportMode?.value || 'none';
+        const shouldImport = (this.elements.customGroupImportMode?.value || 'none') === 'paste';
         const content = (this.elements.customGroupContent?.value || '').trim();
-        if (!name) {
-            Components.showToast('请输入分组名称', 'warning');
+        const targetGroupId = this.pendingCustomGroupTargetId;
+        if (shouldImport && !content) {
+            Components.showToast('请输入节点内容', 'warning');
             return;
         }
-        if (mode === 'paste' && !content) {
-            Components.showToast('请输入节点内容', 'warning');
+
+        if (targetGroupId) {
+            if (!shouldImport) {
+                Components.showToast('请选择“粘贴节点链接”导入模式', 'warning');
+                return;
+            }
+            try {
+                const result = await api.importCustomGroupNodes(targetGroupId, content);
+                await this.loadSubscriptions();
+                this.closeModals();
+                if (this.currentGroup?.group_type === 'custom' && this.currentGroup?.id === targetGroupId) {
+                    await this.selectGroup('custom', targetGroupId);
+                }
+                Components.showToast(
+                    `导入完成: ${result.imported_count} 新增，${result.skipped_duplicates} 重复，忽略 ${result.ignored_unsupported_count || 0} 个不支持节点`,
+                    'success'
+                );
+            } catch (error) {
+                Components.showToast(`导入失败: ${error.message}`, 'error');
+            }
+            return;
+        }
+
+        const name = (this.elements.customGroupName?.value || '').trim();
+        if (!name) {
+            Components.showToast('请输入分组名称', 'warning');
             return;
         }
 
         try {
             const group = await api.createCustomGroup(name);
-            let imported = false;
-            if (mode === 'paste') {
+            let importResult = null;
+            if (shouldImport) {
                 try {
-                    const importResult = await api.importCustomGroupNodes(group.id, content);
-                    imported = true;
-                    Components.showToast(
-                        `导入完成: ${importResult.imported_count} 新增，${importResult.skipped_duplicates} 重复`,
-                        'success'
-                    );
+                    importResult = await api.importCustomGroupNodes(group.id, content);
                 } catch (error) {
                     try {
                         await api.deleteCustomGroup(group.id);
@@ -541,33 +647,64 @@ class App {
             await this.loadSubscriptions();
             this.closeModals();
             await this.selectGroup('custom', group.id);
-            Components.showToast(imported ? '自定义分组已创建并导入节点' : '自定义分组已创建', 'success');
+            if (shouldImport && importResult) {
+                Components.showToast(
+                    `导入完成: ${importResult.imported_count} 新增，${importResult.skipped_duplicates} 重复，忽略 ${importResult.ignored_unsupported_count || 0} 个不支持节点`,
+                    'success'
+                );
+            } else {
+                Components.showToast('自定义分组已创建', 'success');
+            }
         } catch (error) {
             Components.showToast(`创建失败: ${error.message}`, 'error');
         }
     }
 
-    async renameCustomGroup(groupId) {
+    openRenameCustomGroupModal(groupId) {
         const target = this.customGroups.find((item) => item.id === groupId);
         if (!target) return;
-        const nextName = prompt('请输入新的分组名称', target.name);
-        if (nextName === null) return;
-        const trimmed = nextName.trim();
-        if (!trimmed) {
+        this.pendingRenameGroupId = groupId;
+        if (this.elements.renameCustomGroupName) {
+            this.elements.renameCustomGroupName.value = target.name;
+            this.elements.renameCustomGroupName.focus();
+        }
+        this.elements.modalRenameCustomGroup?.classList.add('active');
+    }
+
+    async confirmRenameCustomGroup() {
+        const groupId = this.pendingRenameGroupId;
+        const nextName = (this.elements.renameCustomGroupName?.value || '').trim();
+        if (!groupId) return;
+        if (!nextName) {
             Components.showToast('分组名称不能为空', 'warning');
             return;
         }
+
         try {
-            await api.renameCustomGroup(groupId, trimmed);
+            await api.renameCustomGroup(groupId, nextName);
             await this.loadSubscriptions();
+            this.closeModals();
+            await this.selectGroup('custom', groupId);
             Components.showToast('分组已重命名', 'success');
         } catch (error) {
             Components.showToast(`重命名失败: ${error.message}`, 'error');
         }
     }
 
-    async deleteCustomGroup(groupId) {
-        if (!confirm('确定要删除这个自定义分组吗？')) return;
+    openDeleteCustomGroupModal(groupId) {
+        const target = this.customGroups.find((item) => item.id === groupId);
+        if (!target) return;
+        this.pendingDeleteGroupId = groupId;
+        if (this.elements.deleteCustomGroupName) {
+            this.elements.deleteCustomGroupName.textContent = target.name;
+        }
+        this.elements.modalDeleteCustomGroup?.classList.add('active');
+    }
+
+    async confirmDeleteCustomGroup() {
+        const groupId = this.pendingDeleteGroupId;
+        if (!groupId) return;
+
         try {
             await api.deleteCustomGroup(groupId);
             this.customGroups = this.customGroups.filter((item) => item.id !== groupId);
@@ -581,6 +718,7 @@ class App {
             }
             this.renderSubscriptions();
             await this.restoreSubscriptionSelection();
+            this.closeModals();
             Components.showToast('自定义分组已删除', 'success');
         } catch (error) {
             Components.showToast(`删除失败: ${error.message}`, 'error');
@@ -596,6 +734,35 @@ class App {
         });
         this.pendingTestCooldownReview = null;
         this.pendingExitIpDedupeReview = null;
+        this.pendingCopyNodeIds = [];
+        this.pendingCustomGroupTargetId = null;
+        this.pendingCustomGroupTargetName = '';
+        this.pendingRenameGroupId = null;
+        this.pendingDeleteGroupId = null;
+        this.pendingRemoveNodeId = null;
+        this.resetCustomGroupModalState();
+    }
+
+    resetCustomGroupModalState() {
+        this.elements.customGroupNameRow?.classList.remove('hidden');
+        this.elements.customGroupModeRow?.classList.remove('hidden');
+        this.elements.customGroupTargetRow?.classList.add('hidden');
+        if (this.elements.customGroupTargetName) {
+            this.elements.customGroupTargetName.textContent = '-';
+        }
+        if (this.elements.customGroupModalTitle) {
+            this.elements.customGroupModalTitle.textContent = '自定义节点组';
+        }
+        if (this.elements.customGroupName) {
+            this.elements.customGroupName.value = '';
+        }
+        if (this.elements.customGroupImportMode) {
+            this.elements.customGroupImportMode.value = 'none';
+        }
+        if (this.elements.customGroupContent) {
+            this.elements.customGroupContent.value = '';
+        }
+        this.handleCustomGroupImportModeChange();
     }
 
     updateTestCooldownControls() {
@@ -880,6 +1047,7 @@ class App {
             const item = Components.nodeItem(node, isSelected, {
                 disableNodeCheckbox: node.in_proxy_pool,
                 disableTestButton: this.isNodeTesting,
+                disableCopyToGroup: this.isNodeTesting,
                 showRemoveFromGroup: this.currentGroup?.group_type === 'custom',
                 disableRemoveFromGroup: this.isNodeTesting,
             });
@@ -1207,8 +1375,12 @@ class App {
             await this.testSingleNode(item.dataset.id);
             return;
         }
+        if (action === 'copy-to-group') {
+            this.openCopyToGroupModal([item.dataset.id]);
+            return;
+        }
         if (action === 'remove-from-group') {
-            await this.removeNodeFromCurrentCustomGroup(item.dataset.id);
+            this.removeNodeFromCurrentCustomGroup(item.dataset.id);
             return;
         }
 
@@ -1300,9 +1472,9 @@ class App {
         if (this.isNodeTesting) {
             this.elements.btnAddToGroup.title = '节点测试进行中，请稍候';
         } else if (count === 0) {
-            this.elements.btnAddToGroup.title = '请先勾选未入池节点';
+            this.elements.btnAddToGroup.title = '请先勾选当前可见的可复制节点';
         } else {
-            this.elements.btnAddToGroup.title = '将勾选节点复制到自定义分组';
+            this.elements.btnAddToGroup.title = '将当前可见的勾选节点复制到自定义分组';
         }
         this.elements.btnAddToGroup.textContent = `加入到分组${count > 0 ? ` (${count})` : ''}`;
     }
@@ -1363,23 +1535,17 @@ class App {
     }
 
     getSelectedAddableNodeIds() {
-        const addable = [];
-        this.nodes.forEach((node) => {
-            if (!node.in_proxy_pool && this.selectedNodeIds.has(node.id)) {
-                addable.push(node.id);
-            }
-        });
-        return addable;
+        const visibleIds = new Set(this.getActionableNodesForCurrentView().map((node) => node.id));
+        return this.nodes
+            .filter((node) => visibleIds.has(node.id) && !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .map((node) => node.id);
     }
 
     getSelectedTestableNodeIds() {
-        const testable = [];
-        this.nodes.forEach((node) => {
-            if (!node.in_proxy_pool && this.selectedNodeIds.has(node.id)) {
-                testable.push(node.id);
-            }
-        });
-        return testable;
+        const visibleIds = new Set(this.getActionableNodesForCurrentView().map((node) => node.id));
+        return this.nodes
+            .filter((node) => visibleIds.has(node.id) && !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .map((node) => node.id);
     }
 
     getSuccessfulAddableNodeIds() {
@@ -1780,18 +1946,22 @@ class App {
     }
 
     getSelectedCopyableNodeIds() {
+        const visibleIds = new Set(this.getActionableNodesForCurrentView().map((node) => node.id));
         return this.nodes
-            .filter((node) => !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .filter((node) => visibleIds.has(node.id) && !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
             .map((node) => node.id);
     }
 
-    openCopyToGroupModal() {
-        const selectedNodeIds = this.getSelectedCopyableNodeIds();
-        if (selectedNodeIds.length === 0) {
-            Components.showToast('请先勾选未入池节点', 'warning');
+    openCopyToGroupModal(nodeIds = null) {
+        const sourceNodeIds = Array.isArray(nodeIds) && nodeIds.length > 0
+            ? nodeIds
+            : this.getSelectedCopyableNodeIds();
+        if (sourceNodeIds.length === 0) {
+            Components.showToast('请先勾选当前可见的可复制节点', 'warning');
             return;
         }
         if (!this.elements.copyGroupSelect) return;
+        this.pendingCopyNodeIds = sourceNodeIds;
 
         const options = this.customGroups.map((group) =>
             `<option value="${group.id}">${this.escapeHtml(group.name)} (${group.node_count || 0})</option>`
@@ -1806,7 +1976,8 @@ class App {
     }
 
     async confirmCopyToGroup() {
-        const sourceNodeIds = this.getSelectedCopyableNodeIds();
+        const sourceNodeIds = Array.isArray(this.pendingCopyNodeIds) ? [...this.pendingCopyNodeIds] : [];
+        this.pendingCopyNodeIds = [];
         if (sourceNodeIds.length === 0) {
             Components.showToast('请先勾选节点', 'warning');
             return;
@@ -1829,6 +2000,9 @@ class App {
 
             const result = await api.copyNodesToCustomGroup(targetGroupId, sourceNodeIds);
             await this.loadSubscriptions();
+            if (this.currentGroup?.group_type === 'custom' && this.currentGroup?.id === targetGroupId) {
+                await this.selectGroup('custom', targetGroupId);
+            }
             this.closeModals();
             Components.showToast(
                 `加入分组完成: ${result.copied_count} 新增，${result.skipped_duplicates} 重复`,
@@ -1846,13 +2020,22 @@ class App {
         }
     }
 
-    async removeNodeFromCurrentCustomGroup(nodeId) {
+    removeNodeFromCurrentCustomGroup(nodeId) {
         if (!this.currentGroup || this.currentGroup.group_type !== 'custom') {
             return;
         }
         const node = this.nodes.find((item) => item.id === nodeId);
         if (!node) return;
-        if (!confirm(`确定从分组中移除节点 "${node.name}" 吗？`)) {
+        this.pendingRemoveNodeId = nodeId;
+        if (this.elements.removeNodeName) {
+            this.elements.removeNodeName.textContent = node.name;
+        }
+        this.elements.modalRemoveNodeFromGroup?.classList.add('active');
+    }
+
+    async confirmRemoveNodeFromGroup() {
+        const nodeId = this.pendingRemoveNodeId;
+        if (!nodeId || !this.currentGroup || this.currentGroup.group_type !== 'custom') {
             return;
         }
         try {
@@ -1862,6 +2045,8 @@ class App {
             this.renderNodeExclusionTags();
             this.renderCurrentNodeView();
             await this.loadSubscriptions();
+            await this.selectGroup('custom', this.currentGroup.id);
+            this.closeModals();
             Components.showToast('节点已移出分组', 'success');
         } catch (error) {
             Components.showToast(`移出失败: ${error.message}`, 'error');

@@ -48,6 +48,7 @@ export interface CustomGroupImportResponse {
   imported_count: number;
   skipped_duplicates: number;
   total_parsed: number;
+  ignored_unsupported_count?: number;
 }
 
 export interface CustomGroupListResponse {

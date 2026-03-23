@@ -71,6 +71,7 @@ class TestCustomGroupService(unittest.TestCase):
         self.assertEqual(result["imported_count"], 1)
         self.assertEqual(result["skipped_duplicates"], 1)
         self.assertEqual(result["total_parsed"], 2)
+        self.assertEqual(result["ignored_unsupported_count"], 0)
 
         nodes = self.service.get_nodes_by_group(group["id"])
         self.assertEqual(len(nodes), 1)
@@ -93,6 +94,42 @@ class TestCustomGroupService(unittest.TestCase):
 
         self.assertIn("当前 Xray 不支持的协议", str(exc.exception))
         self.assertIn("ssr", str(exc.exception))
+
+    def test_import_nodes_reports_ignored_unsupported_count_for_mixed_payload(self):
+        group = self.service.create_group("Mixed")
+        trojan_node = ProxyNode(
+            name="TROJAN-1",
+            protocol=Protocol.TROJAN,
+            address="demo.example.com",
+            port=443,
+            password="secret",
+            tls=True,
+        )
+        ssr_node = ProxyNode(
+            name="SSR-1",
+            protocol=Protocol.SSR,
+            address="ssr.example.com",
+            port=443,
+            password="secret",
+            security="aes-256-cfb",
+        )
+        with patch("api.services.custom_group_service.parse_subscription", return_value=[trojan_node, ssr_node]):
+            result = self.service.import_nodes(group["id"], "mixed://demo")
+
+        self.assertEqual(result["imported_count"], 1)
+        self.assertEqual(result["skipped_duplicates"], 0)
+        self.assertEqual(result["total_parsed"], 2)
+        self.assertEqual(result["ignored_unsupported_count"], 1)
+
+    def test_groups_are_sorted_by_updated_at_desc(self):
+        first = self.service.create_group("First")
+        second = self.service.create_group("Second")
+        renamed_first = self.service.rename_group(first["id"], "First Updated")
+        assert renamed_first is not None
+
+        groups = self.service.get_all_groups()
+        self.assertEqual(groups[0]["id"], first["id"])
+        self.assertEqual(groups[1]["id"], second["id"])
 
     def test_copy_nodes_copies_test_fields_and_dedupes(self):
         group = self.service.create_group("Copied")

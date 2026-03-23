@@ -53,6 +53,7 @@ class CustomGroupImportResponse(TypedDict):
     imported_count: int
     skipped_duplicates: int
     total_parsed: int
+    ignored_unsupported_count: NotRequired[int]
 
 class CustomGroupListResponse(TypedDict):
     """Response model for custom node group list."""

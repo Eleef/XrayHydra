@@ -25,6 +25,7 @@ const Components = {
             : '未更新';
         const groupTypeLabel = groupType === 'custom' ? '自定义' : '订阅';
         const showRefresh = groupType === 'subscription';
+        const showImport = groupType === 'custom';
         const showRename = groupType === 'custom';
         const deleteTitle = groupType === 'custom' ? '删除分组' : '删除订阅';
 
@@ -46,6 +47,13 @@ const Components = {
                         <path d="M23 4v6h-6"></path>
                         <path d="M1 20v-6h6"></path>
                         <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                </button>
+                <button class="btn btn-icon btn-sm" data-action="import" title="导入" ${showImport ? '' : 'style="display:none"'}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 4v12"></path>
+                        <polyline points="8 12 12 16 16 12"></polyline>
+                        <path d="M4 20h16"></path>
                     </svg>
                 </button>
                 <button class="btn btn-icon btn-sm" data-action="rename" title="重命名" ${showRename ? '' : 'style="display:none"'}>
@@ -78,6 +86,7 @@ const Components = {
         const inProxyPool = Boolean(node.in_proxy_pool);
         const disableNodeCheckbox = Boolean(options.disableNodeCheckbox || inProxyPool);
         const disableTestButton = Boolean(options.disableTestButton);
+        const disableCopyToGroup = Boolean(options.disableCopyToGroup);
         const showRemoveFromGroup = Boolean(options.showRemoveFromGroup);
         const disableRemoveFromGroup = Boolean(options.disableRemoveFromGroup);
         div.className = `node-item${isSelected ? ' selected' : ''}${inProxyPool ? ' in-proxy-pool' : ''}`;
@@ -110,6 +119,13 @@ const Components = {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </button>
+                <button class="btn btn-icon btn-sm node-copy-btn" data-node-action="copy-to-group" title="复制到分组" ${disableCopyToGroup ? 'disabled' : ''}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="8" y="8" width="10" height="10" rx="2"></rect>
+                        <path d="M5 7V4a2 2 0 0 1 2-2h7"></path>
+                        <polyline points="9 8 9 4 13 4"></polyline>
                     </svg>
                 </button>
                 ${showRemoveFromGroup ? `

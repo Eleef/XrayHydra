@@ -412,13 +412,21 @@ Last Updated: 2026-03-22
 *   **Summary**: 通过粘贴多行节点链接导入到指定自定义组。
 *   **Behavior**:
     *   只接受当前 Xray 可运行协议。
-    *   `SSR` 等不支持协议会沿用现有明确报错逻辑。
+    *   `SSR` 等不支持协议会沿用现有明确报错逻辑；若为混合内容，则忽略不支持协议并继续导入可运行节点。
     *   同组内按连接语义去重。
+*   **Response Fields**:
+    *   `imported_count`: 实际新增节点数。
+    *   `skipped_duplicates`: 因组内语义去重而跳过的数量。
+    *   `total_parsed`: 本次解析出的总节点数。
+    *   `ignored_unsupported_count`: 混合内容中被忽略的不支持协议节点数。
 
 ### **Copy Nodes To Custom Group**
 *   **Endpoint**: `POST /{group_id}/nodes/copy`
 *   **OperationId**: `copyNodesToCustomGroup`
 *   **Summary**: 从当前节点列表复制快照到指定自定义组，支持来源为订阅节点或另一个自定义组节点。
+*   **Behavior**:
+    *   工具栏批量复制只作用于当前筛选结果中显式勾选的节点。
+    *   行内 `复制到分组` 可用于已入池或勾选禁用节点的单节点复制。
 
 ### **Delete Custom Group Node**
 *   **Endpoint**: `DELETE /{group_id}/nodes/{node_id}`

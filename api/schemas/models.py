@@ -236,6 +236,7 @@ class CustomGroupImportResponse(BaseModel):
     imported_count: int
     skipped_duplicates: int
     total_parsed: int
+    ignored_unsupported_count: int = 0
 
 
 class CustomGroupCopyNodesResponse(BaseModel):

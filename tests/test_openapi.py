@@ -208,9 +208,16 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("/api/custom-groups/{group_id}/nodes/copy", spec["paths"])
         self.assertIn("/api/custom-groups/{group_id}/nodes/{node_id}", spec["paths"])
 
-        self.assertIn("/api/custom-groups", spec["paths"])
-        self.assertIn("/api/custom-groups/{group_id}/nodes/import", spec["paths"])
-        self.assertIn("/api/custom-groups/{group_id}/nodes/copy", spec["paths"])
+        import_operation = spec["paths"]["/api/custom-groups/{group_id}/nodes/import"]["post"]
+        import_response = import_operation["responses"]["200"]["content"]["application/json"]["schema"]
+        import_ref = import_response.get("$ref")
+        self.assertTrue(import_ref)
+        import_name = import_ref.rsplit("/", 1)[-1]
+        import_props = schemas[import_name]["properties"]
+        self.assertIn("imported_count", import_props)
+        self.assertIn("skipped_duplicates", import_props)
+        self.assertIn("total_parsed", import_props)
+        self.assertIn("ignored_unsupported_count", import_props)
 
 
 if __name__ == "__main__":
