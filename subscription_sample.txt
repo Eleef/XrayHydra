@@ -1,43 +1,17 @@
+# This file is a sanitized sample used for local parsing/tests.
+# It intentionally contains no real subscription URLs, domains, or credentials.
+
 mixed-port: 7890
 allow-lan: true
 bind-address: '*'
 mode: rule
 log-level: info
 external-controller: '127.0.0.1:9090'
-dns:
-    enable: true
-    ipv6: false
-    default-nameserver: [223.5.5.5, 119.29.29.29]
-    enhanced-mode: fake-ip
-    fake-ip-range: 198.18.0.1/16
-    use-hosts: true
-    nameserver: ['https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query']
-    fallback: ['https://doh.dns.sb/dns-query', 'https://dns.cloudflare.com/dns-query', 'https://dns.twnic.tw/dns-query', 'tls://8.8.4.4:853']
-    fallback-filter: { geoip: true, ipcidr: [240.0.0.0/4, 0.0.0.0/32] }
+
 proxies:
-    - { name: '剩余流量：99.92 GB', type: trojan, server: REDACTED_HOST, port: 12001, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: 套餐到期：长期有效, type: trojan, server: REDACTED_HOST, port: 12001, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇭🇰 香港 01', type: trojan, server: REDACTED_HOST, port: 12001, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇭🇰 香港 02', type: trojan, server: REDACTED_HOST, port: 12002, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇭🇰 香港 03', type: trojan, server: REDACTED_HOST, port: 12003, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇭🇰 香港 04', type: trojan, server: REDACTED_HOST, port: 12004, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇭🇰 香港 05', type: trojan, server: REDACTED_HOST, port: 12005, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇭🇰 香港 06 UDP', type: trojan, server: REDACTED_HOST, port: 12006, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇨🇳 台湾 01', type: trojan, server: REDACTED_HOST, port: 12011, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇨🇳 台湾 02', type: trojan, server: REDACTED_HOST, port: 12012, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇸🇬 新加坡 01', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12021, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇸🇬 新加坡 02', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12022, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇸🇬 新加坡 03', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12023, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇸🇬 新加坡 04', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12024, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇸🇬 新加坡 05', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12025, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇯🇵 日本 01', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12031, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇯🇵 日本 02', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12032, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇯🇵 日本 03', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12033, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇯🇵 日本 04', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12034, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇯🇵 日本 05', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12035, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇺🇸 美国 01', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12051, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇺🇸 美国 02', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12052, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
-    - { name: '🇺🇸 美国 03', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12053, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
+  - { name: '🇭🇰 Hong Kong 01', type: trojan, server: example-hk-01.invalid, port: 443, password: PLACEHOLDER_PASSWORD, udp: true, sni: example.com, skip-cert-verify: true }
+  - { name: '🇯🇵 Japan 01', type: trojan, server: example-jp-01.invalid, port: 443, password: PLACEHOLDER_PASSWORD, udp: true, sni: example.com, skip-cert-verify: true }
+  - { name: '🇸🇬 Singapore 01', type: trojan, server: example-sg-01.invalid, port: 443, password: PLACEHOLDER_PASSWORD, udp: true, sni: example.com, skip-cert-verify: true }
     - { name: '🇺🇸 美国 04', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12054, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
     - { name: '🇨🇦 加拿大 01', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12077, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
     - { name: '🇰🇷 韩国 01', type: trojan, server: 1ab9008c.sched.sma-dk.ali-oss.cn, port: 12041, password: REDACTED_SECRET, udp: true, sni: cdn.alibaba.com, skip-cert-verify: true }
