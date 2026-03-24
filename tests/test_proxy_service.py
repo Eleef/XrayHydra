@@ -59,6 +59,27 @@ class TestProxyService(unittest.TestCase):
         mock_health_service.sync_with_proxies.assert_called_once_with([])
         mock_health_service.stop_monitoring.assert_called_once()
 
+    def test_add_proxies_rejects_runtime_unsupported_nodes(self):
+        """Unsupported protocol nodes should be blocked before entering proxy pool."""
+        mock_subscription_service = MagicMock()
+        mock_subscription_service.get_nodes_by_ids.return_value = [{
+            "id": "node_ssr_1",
+            "name": "SSR Node",
+            "protocol": "ssr",
+            "address": "ssr.example.com",
+            "port": 443,
+        }]
+        mock_custom_service = MagicMock()
+        mock_custom_service.get_nodes_by_ids.return_value = []
+
+        with patch("api.services.proxy_service.get_subscription_service", return_value=mock_subscription_service), \
+             patch("api.services.proxy_service.get_custom_group_service", return_value=mock_custom_service):
+            with self.assertRaises(ValueError) as exc:
+                self.service.add_proxies(["node_ssr_1"])
+
+        self.assertIn("不支持运行", str(exc.exception))
+        self.assertIn("ssr", str(exc.exception))
+
     def test_remove_proxy_while_running_syncs_remaining_ports(self):
         """Removing a live proxy must immediately remove its health state."""
         self._write_proxies([

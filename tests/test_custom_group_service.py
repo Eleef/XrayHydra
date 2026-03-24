@@ -78,7 +78,7 @@ class TestCustomGroupService(unittest.TestCase):
         self.assertEqual(nodes[0]["protocol"], "trojan")
         self.assertEqual(nodes[0]["group_id"], group["id"])
 
-    def test_import_nodes_rejects_ssr_only_payload(self):
+    def test_import_nodes_keeps_ssr_only_payload_for_display(self):
         group = self.service.create_group("SSR")
         ssr_node = ProxyNode(
             name="SSR-1",
@@ -89,13 +89,15 @@ class TestCustomGroupService(unittest.TestCase):
             security="aes-256-cfb",
         )
         with patch("api.services.custom_group_service.parse_subscription", return_value=[ssr_node]):
-            with self.assertRaises(ValueError) as exc:
-                self.service.import_nodes(group["id"], "ssr://demo")
+            result = self.service.import_nodes(group["id"], "ssr://demo")
 
-        self.assertIn("当前 Xray 不支持的协议", str(exc.exception))
-        self.assertIn("ssr", str(exc.exception))
+        self.assertEqual(result["imported_count"], 1)
+        self.assertEqual(result["ignored_unsupported_count"], 0)
+        nodes = self.service.get_nodes_by_group(group["id"])
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0]["protocol"], "ssr")
 
-    def test_import_nodes_reports_ignored_unsupported_count_for_mixed_payload(self):
+    def test_import_nodes_keeps_mixed_payload_without_ignoring_supported_schema(self):
         group = self.service.create_group("Mixed")
         trojan_node = ProxyNode(
             name="TROJAN-1",
@@ -116,10 +118,10 @@ class TestCustomGroupService(unittest.TestCase):
         with patch("api.services.custom_group_service.parse_subscription", return_value=[trojan_node, ssr_node]):
             result = self.service.import_nodes(group["id"], "mixed://demo")
 
-        self.assertEqual(result["imported_count"], 1)
+        self.assertEqual(result["imported_count"], 2)
         self.assertEqual(result["skipped_duplicates"], 0)
         self.assertEqual(result["total_parsed"], 2)
-        self.assertEqual(result["ignored_unsupported_count"], 1)
+        self.assertEqual(result["ignored_unsupported_count"], 0)
 
     def test_groups_are_sorted_by_updated_at_desc(self):
         first = self.service.create_group("First")

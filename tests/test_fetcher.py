@@ -79,6 +79,13 @@ class TestIsBase64Encoded:
         assert is_base64_encoded("vless://user@host:443") is False
         assert is_base64_encoded("ss://YWVz") is False
         assert is_base64_encoded("trojan://pass@host:443") is False
+        assert is_base64_encoded("hysteria2://pass@host:443/?sni=host#demo") is False
+
+    def test_detect_hysteria2_base64_content(self):
+        """测试检测包含 Hysteria2 链接的 Base64 内容。"""
+        original = "hysteria2://pass@example.com:443/?sni=example.com#demo"
+        encoded = base64.b64encode(original.encode()).decode()
+        assert is_base64_encoded(encoded) is True
 
 
 class TestFetchFromUrl:
@@ -164,6 +171,27 @@ class TestFetchFromUrl:
 
         with pytest.raises(FetchError, match="Brotli"):
             fetch_from_url("https://example.com/sub")
+
+    @patch('xray_prism.fetcher.HAS_BROTLI', True)
+    @patch('xray_prism.fetcher._brotli')
+    @patch('xray_prism.fetcher.requests.get')
+    def test_fetch_brotli_content_with_decode_support(self, mock_get, mock_brotli):
+        """测试 Brotli 内容可以被显式解码并继续进行 Base64 识别。"""
+        original = "trojan://pass@example.com:443#demo"
+        encoded = base64.b64encode(original.encode()).decode()
+        mock_brotli.decompress.return_value = encoded.encode("utf-8")
+
+        mock_response = MagicMock()
+        mock_response.text = "garbled"
+        mock_response.content = b"compressed"
+        mock_response.encoding = "utf-8"
+        mock_response.headers = {"Content-Encoding": "br"}
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_from_url("https://example.com/sub")
+        assert result == original
+        mock_brotli.decompress.assert_called_once_with(b"compressed")
 
 
 class TestReadFromFile:

@@ -18,6 +18,7 @@ from .models import (
     get_runtime_support_reason,
     is_runtime_supported_protocol,
 )
+from .runtime_adapters.xray import XrayAdapterRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class ConfigGenerator:
         self.start_port = start_port
         self.listen_address = listen_address
         self.inbound_protocol = inbound_protocol
+        self._adapter_registry = XrayAdapterRegistry()
     
     def generate(self, nodes: List[ProxyNode]) -> Dict[str, Any]:
         """
@@ -222,94 +224,7 @@ class ConfigGenerator:
         if not is_runtime_supported_protocol(node.protocol):
             reason = get_runtime_support_reason(node.protocol) or f"不支持的协议: {node.protocol.value}"
             raise ValueError(reason)
-        
-        if node.protocol == Protocol.VMESS:
-            return self._vmess_outbound(node, tag)
-        elif node.protocol == Protocol.VLESS:
-            return self._vless_outbound(node, tag)
-        elif node.protocol == Protocol.SHADOWSOCKS:
-            return self._shadowsocks_outbound(node, tag)
-        elif node.protocol == Protocol.TROJAN:
-            return self._trojan_outbound(node, tag)
-        else:
-            raise ValueError(f"不支持的协议: {node.protocol}")
-    
-    def _vmess_outbound(self, node: ProxyNode, tag: str) -> Dict[str, Any]:
-        """生成 VMess 出站配置"""
-        outbound = {
-            "tag": tag,
-            "protocol": "vmess",
-            "settings": {
-                "vnext": [{
-                    "address": node.address,
-                    "port": node.port,
-                    "users": [{
-                        "id": node.uuid,
-                        "alterId": node.alter_id,
-                        "security": node.security
-                    }]
-                }]
-            },
-            "streamSettings": self._stream_settings(node)
-        }
-        return outbound
-    
-    def _vless_outbound(self, node: ProxyNode, tag: str) -> Dict[str, Any]:
-        """生成 VLess 出站配置"""
-        user = {
-            "id": node.uuid,
-            "encryption": node.security or "none"
-        }
-        
-        if node.flow:
-            user["flow"] = node.flow
-        
-        outbound = {
-            "tag": tag,
-            "protocol": "vless",
-            "settings": {
-                "vnext": [{
-                    "address": node.address,
-                    "port": node.port,
-                    "users": [user]
-                }]
-            },
-            "streamSettings": self._stream_settings(node)
-        }
-        return outbound
-    
-    def _shadowsocks_outbound(self, node: ProxyNode, tag: str) -> Dict[str, Any]:
-        """生成 Shadowsocks 出站配置"""
-        outbound = {
-            "tag": tag,
-            "protocol": "shadowsocks",
-            "settings": {
-                "servers": [{
-                    "address": node.address,
-                    "port": node.port,
-                    "method": node.security,
-                    "password": node.password
-                }]
-            },
-            "streamSettings": self._stream_settings(node)
-        }
-        return outbound
-    
-    def _trojan_outbound(self, node: ProxyNode, tag: str) -> Dict[str, Any]:
-        """生成 Trojan 出站配置"""
-        outbound = {
-            "tag": tag,
-            "protocol": "trojan",
-            "settings": {
-                "servers": [{
-                    "address": node.address,
-                    "port": node.port,
-                    "password": node.password
-                }]
-            },
-            "streamSettings": self._stream_settings(node)
-        }
-        return outbound
+        return self._adapter_registry.build_outbound(node, tag, self._stream_settings)
     
     def _stream_settings(self, node: ProxyNode) -> Dict[str, Any]:
         """生成传输层配置"""

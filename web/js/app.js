@@ -1017,7 +1017,7 @@ class App {
         const totalCount = this.nodes.length;
         this.elements.nodesCount.textContent = totalCount === visibleCount ? `${totalCount}` : `${visibleCount}/${totalCount}`;
 
-        const visibleSelectableCount = nodesToRender.filter((node) => !node.in_proxy_pool).length;
+        const visibleSelectableCount = nodesToRender.filter((node) => this.isNodeSelectable(node)).length;
         this.elements.btnSelectAll.disabled = this.isNodeTesting || visibleSelectableCount === 0;
 
         if (nodesToRender.length === 0) {
@@ -1045,7 +1045,7 @@ class App {
         nodesToRender.forEach((node) => {
             const isSelected = this.selectedNodeIds.has(node.id);
             const item = Components.nodeItem(node, isSelected, {
-                disableNodeCheckbox: node.in_proxy_pool,
+                disableNodeCheckbox: !this.isNodeSelectable(node),
                 disableTestButton: this.isNodeTesting,
                 disableCopyToGroup: this.isNodeTesting,
                 showRemoveFromGroup: this.currentGroup?.group_type === 'custom',
@@ -1327,11 +1327,12 @@ class App {
     }
 
     syncSelectedNodeIds() {
-        const validNodeIds = new Set(this.nodes.map((node) => node.id));
+        const nodeById = new Map(this.nodes.map((node) => [node.id, node]));
         const nextSelected = new Set();
 
         this.selectedNodeIds.forEach((nodeId) => {
-            if (validNodeIds.has(nodeId)) {
+            const node = nodeById.get(nodeId);
+            if (node && (node.in_proxy_pool || this.isNodeSelectable(node))) {
                 nextSelected.add(nodeId);
             }
         });
@@ -1347,7 +1348,15 @@ class App {
     }
 
     isNodeSelectable(node) {
-        return Boolean(node) && !node.in_proxy_pool;
+        return Boolean(node) && !node.in_proxy_pool && this.isNodeRuntimeSupported(node);
+    }
+
+    isNodeRuntimeSupported(node) {
+        return node?.runtime_supported !== false;
+    }
+
+    getNodeRuntimeSupportReason(node) {
+        return node?.runtime_support_reason || '当前运行环境不支持此协议';
     }
 
     getCurrentNodeFilterQuery() {
@@ -1360,7 +1369,8 @@ class App {
     }
 
     getActionableNodesForCurrentView() {
-        return this.getNodesForCurrentView(this.getCurrentNodeFilterQuery());
+        return this.getNodesForCurrentView(this.getCurrentNodeFilterQuery())
+            .filter((node) => this.isNodeRuntimeSupported(node));
     }
 
     /**
@@ -1369,13 +1379,23 @@ class App {
     async handleNodeClick(e) {
         const item = e.target.closest('.node-item');
         if (!item) return;
+        const node = this.nodes.find((candidate) => candidate.id === item.dataset.id);
+        if (!node) return;
 
         const action = e.target.closest('[data-node-action]')?.dataset.nodeAction;
         if (action === 'test') {
+            if (!this.isNodeRuntimeSupported(node)) {
+                Components.showToast(this.getNodeRuntimeSupportReason(node), 'warning');
+                return;
+            }
             await this.testSingleNode(item.dataset.id);
             return;
         }
         if (action === 'copy-to-group') {
+            if (!this.isNodeRuntimeSupported(node)) {
+                Components.showToast(this.getNodeRuntimeSupportReason(node), 'warning');
+                return;
+            }
             this.openCopyToGroupModal([item.dataset.id]);
             return;
         }
@@ -1387,8 +1407,7 @@ class App {
         // Don't toggle if clicking on checkbox directly
         if (e.target.closest('.node-checkbox')) return;
 
-        const node = this.nodes.find((candidate) => candidate.id === item.dataset.id);
-        if (!node || node.in_proxy_pool || this.isNodeTesting) return;
+        if (!this.isNodeSelectable(node) || this.isNodeTesting) return;
 
         const checkbox = item.querySelector('.node-checkbox');
         checkbox.checked = !checkbox.checked;
@@ -1427,7 +1446,7 @@ class App {
         if (this.isNodeTesting) return;
 
         const selectableNodes = this.getNodesForCurrentView(this.getCurrentNodeFilterQuery())
-            .filter((node) => !node.in_proxy_pool);
+            .filter((node) => this.isNodeSelectable(node));
         if (selectableNodes.length === 0) {
             this.updateNodeActionButtons();
             return;
@@ -1482,7 +1501,7 @@ class App {
     updateSelectAllButton() {
         if (!this.elements.btnSelectAll) return;
         const visibleSelectableCount = this.getNodesForCurrentView(this.getCurrentNodeFilterQuery())
-            .filter((node) => !node.in_proxy_pool).length;
+            .filter((node) => this.isNodeSelectable(node)).length;
         this.elements.btnSelectAll.disabled = this.isNodeTesting || visibleSelectableCount === 0;
         this.elements.btnSelectAll.textContent = visibleSelectableCount > 0 ? `全选 (${visibleSelectableCount})` : '全选';
         this.elements.btnSelectAll.title = this.isNodeTesting
@@ -1537,20 +1556,20 @@ class App {
     getSelectedAddableNodeIds() {
         const visibleIds = new Set(this.getActionableNodesForCurrentView().map((node) => node.id));
         return this.nodes
-            .filter((node) => visibleIds.has(node.id) && !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .filter((node) => visibleIds.has(node.id) && this.isNodeSelectable(node) && this.selectedNodeIds.has(node.id))
             .map((node) => node.id);
     }
 
     getSelectedTestableNodeIds() {
         const visibleIds = new Set(this.getActionableNodesForCurrentView().map((node) => node.id));
         return this.nodes
-            .filter((node) => visibleIds.has(node.id) && !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .filter((node) => visibleIds.has(node.id) && this.isNodeSelectable(node) && this.selectedNodeIds.has(node.id))
             .map((node) => node.id);
     }
 
     getSuccessfulAddableNodeIds() {
         return this.getActionableNodesForCurrentView()
-            .filter((node) => !node.in_proxy_pool && node.test_status === 'success')
+            .filter((node) => this.isNodeSelectable(node) && node.test_status === 'success')
             .map((node) => node.id);
     }
 
@@ -1737,7 +1756,16 @@ class App {
     }
 
     async runNodeTests(nodeIds, { autoSelectSuccess = false, actionLabel = '测试' } = {}) {
-        const uniqueNodeIds = Array.from(new Set((nodeIds || []).filter(Boolean)));
+        const requestedNodeIds = Array.from(new Set((nodeIds || []).filter(Boolean)));
+        const uniqueNodeIds = requestedNodeIds.filter((nodeId) => {
+            const node = this.nodes.find((item) => item.id === nodeId);
+            return this.isNodeRuntimeSupported(node);
+        });
+        if (requestedNodeIds.length > 0 && uniqueNodeIds.length === 0) {
+            const firstNode = this.nodes.find((item) => item.id === requestedNodeIds[0]);
+            Components.showToast(this.getNodeRuntimeSupportReason(firstNode), 'warning');
+            return;
+        }
         if (uniqueNodeIds.length === 0) {
             Components.showToast('请先选择可测试节点', 'warning');
             return;
@@ -1871,6 +1899,10 @@ class App {
     async testSingleNode(nodeId) {
         const node = this.nodes.find((item) => item.id === nodeId);
         if (!node) return;
+        if (!this.isNodeRuntimeSupported(node)) {
+            Components.showToast(this.getNodeRuntimeSupportReason(node), 'warning');
+            return;
+        }
         await this.runNodeTests([nodeId], {
             autoSelectSuccess: false,
             actionLabel: `节点 ${node.name} 测试`,
@@ -1948,16 +1980,19 @@ class App {
     getSelectedCopyableNodeIds() {
         const visibleIds = new Set(this.getActionableNodesForCurrentView().map((node) => node.id));
         return this.nodes
-            .filter((node) => visibleIds.has(node.id) && !node.in_proxy_pool && this.selectedNodeIds.has(node.id))
+            .filter((node) => visibleIds.has(node.id) && this.isNodeSelectable(node) && this.selectedNodeIds.has(node.id))
             .map((node) => node.id);
     }
 
     openCopyToGroupModal(nodeIds = null) {
         const sourceNodeIds = Array.isArray(nodeIds) && nodeIds.length > 0
-            ? nodeIds
+            ? nodeIds.filter((nodeId) => {
+                const node = this.nodes.find((item) => item.id === nodeId);
+                return this.isNodeRuntimeSupported(node);
+            })
             : this.getSelectedCopyableNodeIds();
         if (sourceNodeIds.length === 0) {
-            Components.showToast('请先勾选当前可见的可复制节点', 'warning');
+            Components.showToast('请先勾选当前可见且兼容的可复制节点', 'warning');
             return;
         }
         if (!this.elements.copyGroupSelect) return;

@@ -14,6 +14,8 @@ class ProtocolType(str, Enum):
     VLESS = "vless"
     SHADOWSOCKS = "shadowsocks"
     TROJAN = "trojan"
+    HYSTERIA2 = "hysteria2"
+    SSR = "ssr"
 
 
 class XrayStatus(str, Enum):
@@ -110,6 +112,8 @@ class NodeResponse(BaseModel):
                 "latency_ms": None,
                 "exit_ip": None,
                 "exit_country": None,
+                "runtime_supported": True,
+                "runtime_support_reason": None,
                 "in_proxy_pool": False,
                 "proxy_port": None,
             }
@@ -127,6 +131,8 @@ class NodeResponse(BaseModel):
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
     exit_country: Optional[str] = None
+    runtime_supported: bool = True
+    runtime_support_reason: Optional[str] = None
     in_proxy_pool: bool = False
     proxy_port: Optional[int] = None
 

@@ -93,7 +93,7 @@ def is_base64_encoded(content: str) -> bool:
         True 如果内容是 Base64 编码
     """
     # 如果已经包含协议前缀，则不是 Base64
-    protocol_prefixes = ('vmess://', 'vless://', 'ss://', 'trojan://', 'ssr://')
+    protocol_prefixes = ('vmess://', 'vless://', 'ss://', 'trojan://', 'ssr://', 'hysteria2://', 'hy2://')
     content_lower = content.strip().lower()
     
     for prefix in protocol_prefixes:
@@ -110,6 +110,27 @@ def is_base64_encoded(content: str) -> bool:
         return False
     except (ValueError, UnicodeDecodeError):
         return False
+
+
+def _decode_response_text(response: requests.Response, content_encoding: str) -> str:
+    """
+    Decode response payload with explicit Brotli handling.
+
+    requests/urllib3 may not always transparently decode `br` payloads in every
+    runtime/environment combination, so we normalize it here.
+    """
+    if "br" not in content_encoding:
+        return response.text
+
+    if not HAS_BROTLI:
+        raise FetchError("订阅响应使用 Brotli(br) 压缩，但当前环境未启用该解码支持")
+
+    raw = response.content
+    try:
+        return _brotli.decompress(raw).decode(response.encoding or "utf-8", errors="replace")
+    except Exception:
+        # Some servers return already-decoded body while keeping `br` header.
+        return response.text
 
 
 def fetch_from_url(
@@ -135,7 +156,7 @@ def fetch_from_url(
     """
     # 模拟常见订阅客户端的请求头
     headers = {
-        'User-Agent': user_agent or 'ClashforWindows/0.20.39',
+        'User-Agent': user_agent or DEFAULT_USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept-Encoding': build_accept_encoding(),
@@ -149,10 +170,7 @@ def fetch_from_url(
         response.raise_for_status()
 
         content_encoding = (response.headers.get('Content-Encoding') or '').lower()
-        if 'br' in content_encoding and not HAS_BROTLI:
-            raise FetchError("订阅响应使用 Brotli(br) 压缩，但当前环境未启用该解码支持")
-
-        content = response.text.strip()
+        content = _decode_response_text(response, content_encoding).strip()
         
         if not content:
             raise FetchError("订阅内容为空")

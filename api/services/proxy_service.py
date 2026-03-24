@@ -14,6 +14,7 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.xray_prism.capabilities import evaluate_node_runtime
 from src.xray_prism.models import (
     ProxyNode,
     Protocol,
@@ -276,6 +277,17 @@ class ProxyService:
         if not nodes_data:
             raise ValueError("No valid nodes found")
 
+        unsupported_nodes = [
+            node for node in nodes_data
+            if not evaluate_node_runtime(node).runtime_supported
+        ]
+        if unsupported_nodes:
+            details = ", ".join(
+                f'{node.get("name", node.get("id", "unknown"))}({node.get("protocol", "unknown")})'
+                for node in unsupported_nodes
+            )
+            raise ValueError(f"存在当前 Xray 不支持运行的节点，无法加入代理池: {details}")
+
         # Calculate next available port
         existing_ports = {p["port"] for p in self._data.get("proxies", [])}
         current_port = start_port
@@ -392,7 +404,19 @@ class ProxyService:
                 flow=node_data.get("flow"),
                 public_key=node_data.get("public_key"),
                 short_id=node_data.get("short_id"),
+                hy_obfs=node_data.get("hy_obfs"),
+                hy_obfs_password=node_data.get("hy_obfs_password"),
+                hy_alpn=node_data.get("hy_alpn"),
+                ss_plugin=node_data.get("ss_plugin"),
+                ss_plugin_opts=node_data.get("ss_plugin_opts"),
+                ss_uot=node_data.get("ss_uot"),
+                ss_uot_version=node_data.get("ss_uot_version"),
             )
+            capability = evaluate_node_runtime(proxy_node)
+            if not capability.runtime_supported:
+                reason = capability.reason or f"不支持的协议: {proxy_node.protocol.value}"
+                logger.warning("跳过不可运行节点 %s: %s", proxy.get("node_id"), reason)
+                continue
             # Store local port for mapping
             proxy_node._local_port = proxy["port"]
             proxy_nodes.append(proxy_node)

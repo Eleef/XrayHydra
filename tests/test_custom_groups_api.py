@@ -77,13 +77,19 @@ class _FakeCustomGroupService:
             raise ValueError("not found")
         if not content.strip():
             raise ValueError("empty")
+        parsed = 2
+        imported = 1
         if "ssr://only" in content:
-            raise ValueError("订阅仅包含当前 Xray 不支持的协议: ssr")
+            parsed = 1
+            imported = 1
+        if "trojan://demo\nssr://demo" in content:
+            parsed = 2
+            imported = 2
         return {
-            "imported_count": 1,
+            "imported_count": imported,
             "skipped_duplicates": 0,
-            "total_parsed": 2,
-            "ignored_unsupported_count": 1,
+            "total_parsed": parsed,
+            "ignored_unsupported_count": 0,
         }
 
     def get_nodes_by_ids(self, node_ids):
@@ -187,18 +193,20 @@ class TestCustomGroupsApi(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["imported_count"], 1)
-        self.assertEqual(payload["ignored_unsupported_count"], 1)
+        self.assertEqual(payload["imported_count"], 2)
+        self.assertEqual(payload["ignored_unsupported_count"], 0)
 
-    def test_import_custom_group_nodes_rejects_ssr_only_content(self):
+    def test_import_custom_group_nodes_accepts_ssr_only_content(self):
         fake_service = _FakeCustomGroupService()
         with patch("api.routes.custom_groups.get_custom_group_service", return_value=fake_service):
             response = self.client.post(
                 "/api/custom-groups/grp_demo/nodes/import",
                 json={"content": "ssr://only"},
             )
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("ssr", response.json()["detail"])
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["imported_count"], 1)
+        self.assertEqual(payload["total_parsed"], 1)
 
 
 if __name__ == "__main__":

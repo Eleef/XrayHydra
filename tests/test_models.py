@@ -13,7 +13,9 @@ from xray_prism.models import (
     NetworkType, 
     ProxyNode, 
     TestResult,
-    PortMapping
+    PortMapping,
+    is_runtime_supported_protocol,
+    get_runtime_support_reason,
 )
 
 
@@ -26,11 +28,18 @@ class TestProtocolEnum:
         assert Protocol.VLESS.value == "vless"
         assert Protocol.SHADOWSOCKS.value == "shadowsocks"
         assert Protocol.TROJAN.value == "trojan"
+        assert Protocol.HYSTERIA2.value == "hysteria2"
         assert Protocol.SSR.value == "ssr"
     
     def test_protocol_from_string(self):
         """测试从字符串创建枚举"""
         assert Protocol("vmess") == Protocol.VMESS
+
+    def test_runtime_support_matrix(self):
+        """测试协议运行支持矩阵。"""
+        assert is_runtime_supported_protocol("hysteria2") is True
+        assert is_runtime_supported_protocol("ssr") is False
+        assert get_runtime_support_reason("ssr") is not None
 
 
 class TestNetworkTypeEnum:
@@ -43,6 +52,8 @@ class TestNetworkTypeEnum:
         assert NetworkType.GRPC.value == "grpc"
         assert NetworkType.H2.value == "h2"
         assert NetworkType.KCP.value == "kcp"
+        assert NetworkType.HYSTERIA.value == "hysteria"
+        assert NetworkType.HYSTERIA.value == "hysteria"
 
 
 class TestProxyNode:
@@ -101,6 +112,27 @@ class TestProxyNode:
         assert node.password == "trojan_password"
         assert node.tls is True
         assert node.sni == "example.com"
+
+    def test_create_hysteria2_node(self):
+        """测试创建 Hysteria2 节点"""
+        node = ProxyNode(
+            name="新加坡-HY2",
+            protocol=Protocol.HYSTERIA2,
+            address="sg.example.com",
+            port=8443,
+            password="hy2-secret",
+            network=NetworkType.HYSTERIA,
+            tls=True,
+            sni="sg.example.com",
+            allow_insecure=True,
+            hy_alpn="h3",
+        )
+
+        assert node.protocol == Protocol.HYSTERIA2
+        assert node.password == "hy2-secret"
+        assert node.network == NetworkType.HYSTERIA
+        assert node.sni == "sg.example.com"
+        assert node.hy_alpn == "h3"
     
     def test_default_values(self):
         """测试默认值"""

@@ -192,6 +192,10 @@ def model_body(spec: dict[str, Any]) -> str:
 
     for name in names:
         schema = components.get(name, {})
+        if "enum" in schema and schema.get("type") != "object":
+            lines.append(f"export type {name} = {ts_type(schema)};")
+            lines.append("")
+            continue
         if schema.get("type") != "object":
             continue
         required = set(schema.get("required", []))

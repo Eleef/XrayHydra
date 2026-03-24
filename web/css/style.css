@@ -948,6 +948,22 @@ body {
     background: var(--success-bg);
 }
 
+.node-item.unsupported-protocol {
+    border-color: var(--border-color);
+    background: rgba(107, 114, 128, 0.08);
+    opacity: 0.72;
+}
+
+.node-item.unsupported-protocol:hover {
+    border-color: var(--border-color);
+    background: rgba(107, 114, 128, 0.08);
+}
+
+.node-item.unsupported-protocol.selected {
+    border-color: var(--border-color);
+    background: rgba(107, 114, 128, 0.12);
+}
+
 .node-checkbox {
     width: 16px;
     height: 16px;
@@ -1073,6 +1089,21 @@ body {
     color: var(--success);
     font-size: 0.625rem;
     font-weight: 600;
+}
+
+.node-unsupported-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    background: rgba(71, 85, 105, 0.18);
+    color: var(--text-secondary);
+    font-size: 0.625rem;
+    font-weight: 600;
+}
+
+.node-diagnostic.unsupported .node-diagnostic-value {
+    color: var(--text-secondary);
 }
 
 

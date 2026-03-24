@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
-from src.xray_prism.models import ProxyNode, is_runtime_supported_protocol
+from src.xray_prism.models import ProxyNode
 from src.xray_prism.parser import parse_subscription
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,13 @@ NODE_SNAPSHOT_FIELDS = (
     "grpc_service_name",
     "public_key",
     "short_id",
+    "hy_obfs",
+    "hy_obfs_password",
+    "hy_alpn",
+    "ss_plugin",
+    "ss_plugin_opts",
+    "ss_uot",
+    "ss_uot_version",
     "test_status",
     "latency_ms",
     "exit_ip",
@@ -62,6 +69,13 @@ SEMANTIC_DEDUPE_FIELDS = (
     "grpc_service_name",
     "public_key",
     "short_id",
+    "hy_obfs",
+    "hy_obfs_password",
+    "hy_alpn",
+    "ss_plugin",
+    "ss_plugin_opts",
+    "ss_uot",
+    "ss_uot_version",
 )
 
 
@@ -120,8 +134,6 @@ class CustomGroupService:
     @staticmethod
     def _normalize_node_record(node_data: Dict) -> Dict:
         normalized = dict(node_data)
-        normalized.pop("runtime_supported", None)
-        normalized.pop("runtime_support_reason", None)
         normalized["test_status"] = str(normalized.get("test_status") or "pending")
         normalized.setdefault("group_type", "custom")
         return normalized
@@ -159,6 +171,13 @@ class CustomGroupService:
             "grpc_service_name": node.service_name,
             "public_key": node.public_key,
             "short_id": node.short_id,
+            "hy_obfs": node.hy_obfs,
+            "hy_obfs_password": node.hy_obfs_password,
+            "hy_alpn": node.hy_alpn,
+            "ss_plugin": node.ss_plugin,
+            "ss_plugin_opts": node.ss_plugin_opts,
+            "ss_uot": node.ss_uot,
+            "ss_uot_version": node.ss_uot_version,
             "test_status": "pending",
             "latency_ms": None,
             "exit_ip": None,
@@ -179,43 +198,14 @@ class CustomGroupService:
         snapshot["alter_id"] = int(snapshot.get("alter_id") or 0)
         return snapshot
 
-    def _detect_supported_nodes(self, content: str) -> tuple[List[ProxyNode], int]:
+    def _detect_nodes_for_import(self, content: str) -> tuple[List[ProxyNode], int]:
         parsed_nodes = parse_subscription(content)
         if not parsed_nodes:
             raw_nodes = parse_subscription(content, filter_nodes=False)
             if raw_nodes:
-                detected_protocols = sorted({node.protocol.value for node in raw_nodes})
-                unsupported_protocols = sorted({
-                    node.protocol.value
-                    for node in raw_nodes
-                    if not is_runtime_supported_protocol(node.protocol)
-                })
-                if unsupported_protocols and set(unsupported_protocols) == set(detected_protocols):
-                    raise ValueError(
-                        f"订阅仅包含当前 Xray 不支持的协议: {', '.join(unsupported_protocols)}"
-                    )
-                raise ValueError("导入内容仅包含元数据或当前不支持的节点")
+                raise ValueError("导入内容仅包含元数据节点")
             raise ValueError("No nodes found in import content")
-
-        supported_nodes = [node for node in parsed_nodes if is_runtime_supported_protocol(node.protocol)]
-        if not supported_nodes:
-            unsupported_protocols = sorted({node.protocol.value for node in parsed_nodes})
-            raise ValueError(
-                f"订阅仅包含当前 Xray 不支持的协议: {', '.join(unsupported_protocols)}"
-            )
-
-        ignored_unsupported = len(parsed_nodes) - len(supported_nodes)
-        if ignored_unsupported > 0:
-            ignored_protocols = sorted({
-                node.protocol.value
-                for node in parsed_nodes
-                if not is_runtime_supported_protocol(node.protocol)
-            })
-            logger.info(
-                "忽略自定义分组导入中当前 Xray 不支持的协议节点: %s",
-                ", ".join(ignored_protocols),
-            )
-        return supported_nodes, ignored_unsupported
+        return parsed_nodes, 0
 
     def _group_node_count(self, group_id: str) -> int:
         return len([
@@ -353,11 +343,11 @@ class CustomGroupService:
         }
 
     def import_nodes(self, group_id: str, content: str) -> Dict:
-        supported_nodes, ignored_unsupported = self._detect_supported_nodes(content)
-        snapshots = [self._snapshot_from_proxy_node(node) for node in supported_nodes]
+        parsed_nodes, ignored_unsupported = self._detect_nodes_for_import(content)
+        snapshots = [self._snapshot_from_proxy_node(node) for node in parsed_nodes]
         result = self._add_node_snapshots(group_id, snapshots)
         result["ignored_unsupported_count"] = ignored_unsupported
-        result["total_parsed"] = len(supported_nodes) + ignored_unsupported
+        result["total_parsed"] = len(parsed_nodes) + ignored_unsupported
         return result
 
     def copy_nodes(

@@ -12,6 +12,7 @@ from api.schemas.models import (
     SuccessResponse,
     ErrorResponse
 )
+from api.routes.node_response_builder import build_node_response
 from api.services.proxy_service import get_proxy_service
 from api.services.subscription_service import get_subscription_service
 
@@ -21,20 +22,11 @@ router = APIRouter(prefix="/api/subscriptions", tags=["Subscriptions"])
 def _build_node_response(node: dict, proxy_port_by_node_id: dict[str, int]) -> NodeResponse:
     proxy_port = proxy_port_by_node_id.get(str(node["id"]))
     subscription_id = str(node["subscription_id"])
-    return NodeResponse(
-        id=node["id"],
+    return build_node_response(
+        node,
         group_id=subscription_id,
         group_type="subscription",
         subscription_id=subscription_id,
-        name=node["name"],
-        protocol=node["protocol"],
-        address=node["address"],
-        port=node["port"],
-        test_status=node.get("test_status", "pending"),
-        latency_ms=node.get("latency_ms"),
-        exit_ip=node.get("exit_ip"),
-        exit_country=node.get("exit_country"),
-        in_proxy_pool=proxy_port is not None,
         proxy_port=proxy_port,
     )
 

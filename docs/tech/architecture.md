@@ -1,6 +1,6 @@
 # **Xray-Prism Technical Architecture**
 
-Last Updated: 2026-03-22
+Last Updated: 2026-03-24
 
 ## **1. Overview (概述)**
 
@@ -22,8 +22,11 @@ graph TD
     
     subgraph "Engine Layer"
         SubService --> Fetcher[Fetcher]
-        SubService --> Parser[Parser]
+        SubService --> Decoder[Subscription Decoder]
+        Decoder --> Parser[Protocol Parser Registry]
+        Parser --> Capability[Capability Evaluator]
         ProxyService --> Generator[Config Generator]
+        Generator --> Adapter[Xray Runtime Adapter Registry]
         ProxyService --> Runner[Process Runner]
         HealthService --> Monitor[Health Monitor]
         Monitor --> Tester[Connectivity Tester]
@@ -41,13 +44,17 @@ graph TD
 1.  **Subscription Flow**:
     *   Client -> API: 添加订阅 URL
     *   Fetcher: 下载内容
-    *   Parser: 解析为 `ProxyNode` 对象列表
+    *   Subscription Decoder: 归一化为可解析的订阅文本 / Clash 节点项
+    *   Protocol Parser Registry: 解析为 `ProxyNode` 对象列表
+    *   Capability Evaluator: 标记 `runtime_supported` / `runtime_support_reason`
     *   Storage: 保存至 `subscriptions.json`
 
 2.  **Proxy Activation Flow**:
     *   Client -> API: 选择节点并激活
+    *   Capability Evaluator: 拒绝当前运行链路不支持的节点
     *   Generator: 为每个节点分配本地端口 (Base Port + Index)
-    *   Generator: 生成 Xray JSON 配置 (Socks Inbound <-> Routing <-> Outbound)
+    *   Xray Runtime Adapter Registry: 按协议生成 outbound
+    *   Generator: 组装完整 Xray JSON 配置 (Socks Inbound <-> Routing <-> Outbound)
     *   Runner: 重启 Xray 进程加载新配置
     *   HealthService: 仅同步当前正在运行的代理端口，移除已删除或未启动的端口健康状态
 
@@ -88,7 +95,7 @@ graph TD
 ```python
 class ProxyNode:
     name: str           # 节点名称
-    protocol: Protocol  # vmess/vless/ss/trojan/ssr(仅用于识别)
+    protocol: Protocol  # vmess/vless/ss/trojan/hysteria2/ssr
     address: str        # 目标服务器 IP
     port: int           # 目标服务器端口
     uuid: str           # 身份凭证
@@ -107,12 +114,30 @@ class ProxyHealthState:
 
 ## **6. Protocol Recognition vs Runtime Support**
 
-解析层当前可以识别 `vmess`、`vless`、`shadowsocks`、`trojan` 和 `ssr`。但运行层仍只接受 `RUNTIME_SUPPORTED_PROTOCOLS` 中的协议，也就是 `vmess/vless/shadowsocks/trojan`。
+解析层当前可以识别 `vmess`、`vless`、`shadowsocks`、`trojan`、`hysteria2` 和 `ssr`。运行层当前接受 `RUNTIME_SUPPORTED_PROTOCOLS` 中的协议，也就是 `vmess/vless/shadowsocks/trojan/hysteria2`。
 
-这意味着“能识别订阅内容”和“能被当前 Xray 运行”是两个不同阶段。`ssr://` 会被识别出来，用于给用户返回准确错误，而不会再被误判成“空订阅”。
+这意味着“能识别订阅内容”和“能被当前 Xray 运行”是两个不同阶段。`hysteria2://` 会进入正常运行链路；`ssr://` 会被识别并保留在节点列表中，但仍不会进入 Xray 运行链路。不兼容协议节点也会保留在节点列表中，避免前端误以为订阅“丢了节点”。
+
+当前实现已经把这两个阶段拆成独立模块：
+- `subscription_decoders/*`: 处理 Base64、多行 URI、Clash YAML 等订阅格式
+- `protocol_parsers/*`: 按协议拆分 URI/Clash 节点解析
+- `capabilities.py`: 单点给出 `runtime_supported` 与原因
+- `runtime_adapters/xray/*`: 按协议生成 Xray outbound
+
+这样以后新增协议时，不再需要同时修改 API、前端和运行服务里的多处分支判断；优先新增 parser 和 capability 规则，只有真正可运行时才再补 Xray adapter。
+
+能力判定已经不是单纯“按协议名”布尔判断。像 `shadowsocks` 这类协议，当前会继续识别并展示 `plugin`、`UoT`、`SS2022` 等字段，其中：
+- 基础 SS / SS2022 / UoT 节点进入运行链路
+- 带当前未映射的 SS plugin 节点会保留在列表中，但标记为 `runtime_supported = false`
 
 ## **7. SSR Handling**
 
-当订阅只包含 SSR 节点时，创建或刷新订阅会直接返回明确错误：`订阅仅包含当前 Xray 不支持的协议: ssr`。
+SSR（ShadowsocksR）节点会被正常解析并持久化，这样前端可以把它们显示出来，避免用户误以为订阅“只解析出了少量节点”。
 
-当订阅同时包含可运行协议和 SSR 时，系统只导入可运行节点，忽略 SSR 节点，并记录一条日志说明哪些协议被跳过。这样代理池、节点测试和 Xray 配置始终只处理当前真正可运行的节点。
+但 SSR 仍不会进入代理池、节点测试或 Xray 配置生成链路。前端会将这些节点标记为不兼容协议，并以灰色不可选状态展示；后端若收到直接的“加代理/测试”请求，也会明确拒绝。
+
+## **8. Hysteria2 Support**
+
+`hysteria2://` / `hy2://` 节点会被解析为 `Protocol.HYSTERIA2`，并进入当前可运行协议集合。
+
+运行时配置遵循 Xray 官方 `hysteria2` 出站与 `hysteria` 传输层模型：出站协议为 `hysteria2`，`streamSettings.network = "hysteria"`，同时携带 `hysteriaSettings.version = 2` 与认证参数 `auth`。

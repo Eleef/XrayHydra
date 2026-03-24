@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.xray_prism.fetcher import fetch_subscription
 from src.xray_prism.parser import parse_subscription
-from src.xray_prism.models import ProxyNode, is_runtime_supported_protocol
+from src.xray_prism.models import ProxyNode
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,8 @@ class SubscriptionService:
     def _normalize_node_record(self, node_data: Dict) -> Dict:
         """Normalize persisted node records."""
         normalized = dict(node_data)
-        normalized.pop("runtime_supported", None)
-        normalized.pop("runtime_support_reason", None)
+        normalized.setdefault("group_type", "subscription")
+        normalized["test_status"] = str(normalized.get("test_status") or "pending")
         return normalized
     
     def get_all_subscriptions(self) -> List[Dict]:
@@ -172,42 +172,15 @@ class SubscriptionService:
         if not parsed_nodes:
             raw_nodes: List[ProxyNode] = parse_subscription(content, filter_nodes=False)
             if raw_nodes:
-                detected_protocols = sorted({node.protocol.value for node in raw_nodes})
-                unsupported_protocols = sorted({
-                    node.protocol.value
-                    for node in raw_nodes
-                    if not is_runtime_supported_protocol(node.protocol)
-                })
-                if unsupported_protocols and set(unsupported_protocols) == set(detected_protocols):
-                    raise ValueError(
-                        f"订阅仅包含当前 Xray 不支持的协议: {', '.join(unsupported_protocols)}"
-                    )
-                raise ValueError("订阅仅包含元数据或当前不支持的节点")
+                raise ValueError("订阅仅包含元数据节点")
             raise ValueError("No nodes found in subscription")
 
-        nodes = [node for node in parsed_nodes if is_runtime_supported_protocol(node.protocol)]
-        if not nodes:
-            unsupported_protocols = sorted({node.protocol.value for node in parsed_nodes})
-            raise ValueError(
-                f"订阅仅包含当前 Xray 不支持的协议: {', '.join(unsupported_protocols)}"
-            )
-        if len(nodes) < len(parsed_nodes):
-            ignored_protocols = sorted({
-                node.protocol.value
-                for node in parsed_nodes
-                if not is_runtime_supported_protocol(node.protocol)
-            })
-            logger.info(
-                "忽略订阅 %s 中当前 Xray 不支持的协议节点: %s",
-                sub_id,
-                ", ".join(ignored_protocols),
-            )
-
         nodes_data: Dict[str, Dict] = {}
-        for idx, node in enumerate(nodes):
+        for idx, node in enumerate(parsed_nodes):
             node_id = f"node_{sub_id}_{idx:04d}"
             nodes_data[node_id] = {
                 "subscription_id": sub_id,
+                "group_type": "subscription",
                 "name": node.name,
                 "protocol": node.protocol.value,
                 "address": node.address,
@@ -227,6 +200,13 @@ class SubscriptionService:
                 "fingerprint": node.fingerprint,
                 "public_key": node.public_key,
                 "short_id": node.short_id,
+                "hy_obfs": node.hy_obfs,
+                "hy_obfs_password": node.hy_obfs_password,
+                "hy_alpn": node.hy_alpn,
+                "ss_plugin": node.ss_plugin,
+                "ss_plugin_opts": node.ss_plugin_opts,
+                "ss_uot": node.ss_uot,
+                "ss_uot_version": node.ss_uot_version,
                 "test_status": "pending",
                 "latency_ms": None,
                 "exit_ip": None,

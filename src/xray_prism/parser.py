@@ -2,15 +2,13 @@
 """
 Xray-Prism 核心解析层
 
-负责解析 vmess/vless/ss/trojan/ssr 协议链接，转换为统一的 ProxyNode 对象。
+负责解析 vmess/vless/ss/trojan/hysteria2/ssr 协议链接，转换为统一的 ProxyNode 对象。
 """
 
-import base64
-import json
 import logging
 import re
 from typing import List, Optional, Dict, Any
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import unquote
 
 # 尝试导入 PyYAML 用于解析 Clash 格式
 try:
@@ -19,52 +17,23 @@ except ImportError:
     yaml = None
 
 from .models import ProxyNode, Protocol, NetworkType
+from .protocol_parsers.base import (
+    ParseError,
+    parse_network_type,
+)
+from .protocol_parsers.hysteria2 import parse_hysteria2 as _parse_hysteria2_impl
+from .protocol_parsers.registry import create_default_registry
+from .protocol_parsers.shadowsocks import parse_shadowsocks as _parse_shadowsocks_impl
+from .protocol_parsers.ssr import parse_ssr as _parse_ssr_impl
+from .protocol_parsers.trojan import parse_trojan as _parse_trojan_impl
+from .protocol_parsers.vless import parse_vless as _parse_vless_impl
+from .protocol_parsers.vmess import parse_vmess as _parse_vmess_impl
+from .subscription_decoders import create_default_decoder_registry
 
 logger = logging.getLogger(__name__)
 
-
-class ParseError(Exception):
-    """解析错误"""
-    pass
-
-
-def _decode_base64(content: str) -> str:
-    """Base64 解码辅助函数"""
-    content = content.strip()
-    content = content.replace('-', '+').replace('_', '/')
-    padding_needed = 4 - (len(content) % 4)
-    if padding_needed != 4:
-        content += '=' * padding_needed
-    return base64.b64decode(content).decode('utf-8')
-
-
-def _parse_network_type(net: str) -> NetworkType:
-    """解析网络类型"""
-    net = net.lower() if net else "tcp"
-    mapping = {
-        "tcp": NetworkType.TCP,
-        "ws": NetworkType.WS,
-        "websocket": NetworkType.WS,
-        "grpc": NetworkType.GRPC,
-        "gun": NetworkType.GRPC,
-        "h2": NetworkType.H2,
-        "http": NetworkType.H2,
-        "kcp": NetworkType.KCP,
-    }
-    return mapping.get(net, NetworkType.TCP)
-
-
-def _decode_optional_base64_param(value: Optional[str]) -> Optional[str]:
-    """Decode optional Base64-like params and fall back to URL decoding."""
-    if value is None:
-        return None
-    raw = str(value).strip()
-    if not raw:
-        return None
-    try:
-        return _decode_base64(raw)
-    except Exception:
-        return unquote(raw)
+_PROTOCOL_REGISTRY = create_default_registry()
+_SUBSCRIPTION_DECODER_REGISTRY = create_default_decoder_registry()
 
 
 def parse_vmess(uri: str) -> ProxyNode:
@@ -82,54 +51,7 @@ def parse_vmess(uri: str) -> ProxyNode:
     Raises:
         ParseError: 解析失败
     """
-    try:
-        # 移除协议前缀
-        encoded = uri.replace("vmess://", "").strip()
-        
-        # Base64 解码
-        json_str = _decode_base64(encoded)
-        config = json.loads(json_str)
-        
-        # 提取必要字段
-        name = config.get("ps", config.get("remarks", "Unknown"))
-        address = config.get("add", config.get("address", ""))
-        port = int(config.get("port", 0))
-        uuid = config.get("id", "")
-        
-        # 提取可选字段
-        alter_id = int(config.get("aid", config.get("alterId", 0)))
-        security = config.get("scy", config.get("security", "auto"))
-        network = _parse_network_type(config.get("net", config.get("network", "tcp")))
-        
-        # TLS 相关
-        tls = config.get("tls", "") == "tls"
-        sni = config.get("sni", config.get("host", ""))
-        
-        # WebSocket 相关
-        host = config.get("host", "")
-        path = config.get("path", "")
-        
-        # gRPC 相关
-        service_name = config.get("type", "") if network == NetworkType.GRPC else None
-        
-        return ProxyNode(
-            name=name,
-            protocol=Protocol.VMESS,
-            address=address,
-            port=port,
-            uuid=uuid,
-            alter_id=alter_id,
-            security=security,
-            network=network,
-            tls=tls,
-            sni=sni if sni else None,
-            host=host if host else None,
-            path=path if path else None,
-            service_name=service_name,
-        )
-        
-    except Exception as e:
-        raise ParseError(f"VMess 解析失败: {e}")
+    return _parse_vmess_impl(uri)
 
 
 def parse_vless(uri: str) -> ProxyNode:
@@ -147,150 +69,14 @@ def parse_vless(uri: str) -> ProxyNode:
     Raises:
         ParseError: 解析失败
     """
-    try:
-        # 解析 URL
-        parsed = urlparse(uri)
-        
-        # 提取基本信息
-        uuid = parsed.username or ""
-        address = parsed.hostname or ""
-        port = parsed.port or 443
-        name = unquote(parsed.fragment) if parsed.fragment else "Unknown"
-        
-        # 解析查询参数
-        params = parse_qs(parsed.query)
-        
-        # 提取参数（每个参数是列表，取第一个值）
-        security = params.get("encryption", ["none"])[0]
-        network = _parse_network_type(params.get("type", ["tcp"])[0])
-        
-        # TLS 相关
-        tls_type = params.get("security", ["none"])[0]
-        tls = tls_type in ("tls", "reality")
-        sni = params.get("sni", [None])[0]
-        fingerprint = params.get("fp", [None])[0]
-        
-        # WebSocket 相关
-        host = params.get("host", [None])[0]
-        path = params.get("path", [None])[0]
-        if path:
-            path = unquote(path)
-        
-        # gRPC 相关
-        service_name = params.get("serviceName", [None])[0]
-        
-        # VLess flow
-        flow = params.get("flow", [None])[0]
-        
-        # Reality 相关
-        public_key = params.get("pbk", [None])[0]
-        short_id = params.get("sid", [None])[0]
-        
-        return ProxyNode(
-            name=name,
-            protocol=Protocol.VLESS,
-            address=address,
-            port=port,
-            uuid=uuid,
-            security=security,
-            network=network,
-            tls=tls,
-            sni=sni,
-            fingerprint=fingerprint,
-            host=host,
-            path=path,
-            service_name=service_name,
-            flow=flow,
-            public_key=public_key,
-            short_id=short_id,
-        )
-        
-    except Exception as e:
-        raise ParseError(f"VLess 解析失败: {e}")
+    return _parse_vless_impl(uri)
 
 
 def parse_shadowsocks(uri: str) -> ProxyNode:
     """
     解析 Shadowsocks 链接
-    
-    支持两种格式:
-    1. ss://base64(method:password)@host:port#name
-    2. ss://base64(method:password@host:port)#name
-    
-    Args:
-        uri: Shadowsocks 链接
-        
-    Returns:
-        ProxyNode 对象
-        
-    Raises:
-        ParseError: 解析失败
     """
-    try:
-        # 移除协议前缀
-        content = uri.replace("ss://", "").strip()
-        
-        # 分离名称
-        name = "Unknown"
-        if "#" in content:
-            content, name = content.rsplit("#", 1)
-            name = unquote(name)
-        
-        # 尝试解析格式 1: base64(method:password)@host:port
-        if "@" in content:
-            parts = content.rsplit("@", 1)
-            if len(parts) == 2:
-                try:
-                    user_info = _decode_base64(parts[0])
-                    host_port = parts[1]
-                except:
-                    # 可能是格式 2
-                    user_info = None
-                    host_port = None
-                
-                if user_info and ":" in user_info:
-                    method, password = user_info.split(":", 1)
-                    
-                    # 解析 host:port
-                    if ":" in host_port:
-                        address, port_str = host_port.rsplit(":", 1)
-                        port = int(port_str)
-                    else:
-                        raise ParseError("缺少端口号")
-                    
-                    return ProxyNode(
-                        name=name,
-                        protocol=Protocol.SHADOWSOCKS,
-                        address=address,
-                        port=port,
-                        password=password,
-                        security=method,
-                    )
-        
-        # 尝试解析格式 2: base64(完整内容)
-        try:
-            decoded = _decode_base64(content)
-            # 格式: method:password@host:port
-            match = re.match(r'([^:]+):([^@]+)@([^:]+):(\d+)', decoded)
-            if match:
-                method, password, address, port = match.groups()
-                return ProxyNode(
-                    name=name,
-                    protocol=Protocol.SHADOWSOCKS,
-                    address=address,
-                    port=int(port),
-                    password=password,
-                    security=method,
-                )
-        except:
-            pass
-        
-        raise ParseError("无法识别的 Shadowsocks 格式")
-        
-    except ParseError:
-        raise
-    except Exception as e:
-        raise ParseError(f"Shadowsocks 解析失败: {e}")
+    return _parse_shadowsocks_impl(uri)
 
 
 def parse_trojan(uri: str) -> ProxyNode:
@@ -308,59 +94,18 @@ def parse_trojan(uri: str) -> ProxyNode:
     Raises:
         ParseError: 解析失败
     """
-    try:
-        # 解析 URL
-        parsed = urlparse(uri)
-        
-        # 提取基本信息
-        password = unquote(parsed.username) if parsed.username else ""
-        address = parsed.hostname or ""
-        port = parsed.port or 443
-        name = unquote(parsed.fragment) if parsed.fragment else "Unknown"
-        
-        # 解析查询参数
-        params = parse_qs(parsed.query)
-        
-        # 提取参数
-        network = _parse_network_type(params.get("type", ["tcp"])[0])
-        
-        # TLS 相关（Trojan 默认开启 TLS）
-        tls_type = params.get("security", ["tls"])[0]
-        tls = tls_type != "none"
-        sni = params.get("sni", [None])[0]
-        fingerprint = params.get("fp", [None])[0]
-        
-        # allowInsecure 参数 - 跳过证书验证
-        allow_insecure_str = params.get("allowInsecure", params.get("allowinsecure", ["0"]))[0]
-        allow_insecure = allow_insecure_str in ("1", "true", "True")
-        
-        # WebSocket 相关
-        host = params.get("host", [None])[0]
-        path = params.get("path", [None])[0]
-        if path:
-            path = unquote(path)
-        
-        # gRPC 相关
-        service_name = params.get("serviceName", [None])[0]
-        
-        return ProxyNode(
-            name=name,
-            protocol=Protocol.TROJAN,
-            address=address,
-            port=port,
-            password=password,
-            network=network,
-            tls=tls,
-            sni=sni,
-            fingerprint=fingerprint,
-            allow_insecure=allow_insecure,
-            host=host,
-            path=path,
-            service_name=service_name,
-        )
-        
-    except Exception as e:
-        raise ParseError(f"Trojan 解析失败: {e}")
+    return _parse_trojan_impl(uri)
+
+
+def parse_hysteria2(uri: str) -> ProxyNode:
+    """
+    解析 Hysteria2 链接
+
+    常见格式:
+    hysteria2://password@host:port/?insecure=1&sni=example.com#name
+    hy2://password@host:port/?insecure=1&sni=example.com#name
+    """
+    return _parse_hysteria2_impl(uri)
 
 
 def parse_ssr(uri: str) -> ProxyNode:
@@ -369,33 +114,7 @@ def parse_ssr(uri: str) -> ProxyNode:
 
     格式: ssr://base64(server:port:protocol:method:obfs:base64(password)/?params)
     """
-    try:
-        encoded = uri.replace("ssr://", "", 1).strip()
-        decoded = _decode_base64(encoded)
-        main_part, _, query = decoded.partition("/?")
-        match = re.match(
-            r"^(?P<address>.+?):(?P<port>\d+):(?P<ssr_protocol>[^:]+):(?P<method>[^:]+):(?P<obfs>[^:]+):(?P<password>.+)$",
-            main_part,
-        )
-        if not match:
-            raise ParseError("无法识别的 SSR 格式")
-
-        params = parse_qs(query, keep_blank_values=True)
-        name = _decode_optional_base64_param(params.get("remarks", [None])[0]) or "Unknown"
-
-        return ProxyNode(
-            name=name,
-            protocol=Protocol.SSR,
-            address=match.group("address"),
-            port=int(match.group("port")),
-            password=_decode_optional_base64_param(match.group("password")) or "",
-            security=match.group("method"),
-            network=NetworkType.TCP,
-        )
-    except ParseError:
-        raise
-    except Exception as e:
-        raise ParseError(f"SSR 解析失败: {e}")
+    return _parse_ssr_impl(uri)
 
 
 def parse_line(line: str) -> Optional[ProxyNode]:
@@ -416,19 +135,11 @@ def parse_line(line: str) -> Optional[ProxyNode]:
         return None
     
     try:
-        if line.startswith("vmess://"):
-            return parse_vmess(line)
-        elif line.startswith("vless://"):
-            return parse_vless(line)
-        elif line.startswith("ss://"):
-            return parse_shadowsocks(line)
-        elif line.startswith("trojan://"):
-            return parse_trojan(line)
-        elif line.startswith("ssr://"):
-            return parse_ssr(line)
-        else:
-            logger.debug(f"不支持的协议: {line[:20]}...")
-            return None
+        node = _PROTOCOL_REGISTRY.parse(line)
+        if node is not None:
+            return node
+        logger.debug(f"不支持的协议: {line[:20]}...")
+        return None
     except ParseError as e:
         logger.warning(f"解析失败: {e}")
         return None
@@ -478,15 +189,16 @@ def parse_subscription(content: str, filter_nodes: bool = True) -> List[ProxyNod
     """
     content = content.strip()
     
-    # 检测是否为 Clash YAML 格式
-    if _is_clash_format(content):
+    decoded = _SUBSCRIPTION_DECODER_REGISTRY.decode(content)
+
+    if decoded.mode == "clash_yaml":
         logger.info("检测到 Clash YAML 格式")
-        nodes = _parse_clash_yaml(content)
+        nodes = _parse_clash_yaml(decoded.content)
     else:
         # 标准 URI 列表格式
         logger.info("使用标准 URI 格式解析")
         nodes = []
-        lines = content.split('\n')
+        lines = decoded.content.split('\n')
         
         for i, line in enumerate(lines, 1):
             line = line.strip()
@@ -511,21 +223,6 @@ def parse_subscription(content: str, filter_nodes: bool = True) -> List[ProxyNod
             logger.info(f"过滤掉 {filtered_count} 个元数据节点，剩余 {len(nodes)} 个有效节点")
     
     return nodes
-
-
-def _is_clash_format(content: str) -> bool:
-    """检测是否为 Clash YAML 格式"""
-    # 检查是否包含 Clash 配置的关键字段
-    clash_keywords = ['proxies:', 'proxy-groups:', 'mixed-port:', 'port:']
-    content_lower = content.lower()
-    
-    for keyword in clash_keywords:
-        if keyword in content_lower:
-            return True
-    
-    return False
-
-
 def _parse_clash_yaml(content: str) -> List[ProxyNode]:
     """
     解析 Clash YAML 格式配置
@@ -603,6 +300,8 @@ def _parse_clash_regex(content: str) -> List[ProxyNode]:
                 'vless': Protocol.VLESS,
                 'ss': Protocol.SHADOWSOCKS,
                 'shadowsocks': Protocol.SHADOWSOCKS,
+                'hysteria2': Protocol.HYSTERIA2,
+                'hy2': Protocol.HYSTERIA2,
             }
             
             protocol = protocol_map.get(proxy_type.lower())
@@ -616,7 +315,8 @@ def _parse_clash_regex(content: str) -> List[ProxyNode]:
                 address=server.strip(),
                 port=int(port),
                 password=password.strip().strip("'\""),
-                tls=True,  # Clash Trojan 默认启用 TLS
+                network=NetworkType.HYSTERIA if protocol == Protocol.HYSTERIA2 else NetworkType.TCP,
+                tls=True,  # Clash Trojan/Hysteria2 默认启用 TLS
                 sni=sni,
                 allow_insecure=skip_cert_verify,
             )
@@ -658,6 +358,8 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             'vless': Protocol.VLESS,
             'ss': Protocol.SHADOWSOCKS,
             'shadowsocks': Protocol.SHADOWSOCKS,
+            'hysteria2': Protocol.HYSTERIA2,
+            'hy2': Protocol.HYSTERIA2,
         }
         
         protocol = protocol_map.get(proxy_type)
@@ -666,17 +368,22 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             return None
         
         # 提取通用字段
-        password = proxy.get('password', '')
+        password = proxy.get('password', '') or proxy.get('auth-str', '') or proxy.get('auth_str', '')
         uuid = proxy.get('uuid', '')
         
         # TLS 相关
         tls = proxy.get('tls', False)
         sni = proxy.get('sni', proxy.get('servername', ''))
         skip_cert_verify = proxy.get('skip-cert-verify', False)
-        
+        if protocol == Protocol.HYSTERIA2:
+            tls = True
+            sni = sni or server
+
         # 网络类型
         network_str = proxy.get('network', 'tcp')
-        network = _parse_network_type(network_str)
+        network = parse_network_type(network_str)
+        if protocol == Protocol.HYSTERIA2:
+            network = NetworkType.HYSTERIA
         
         # WebSocket 相关
         ws_opts = proxy.get('ws-opts', {})
@@ -687,10 +394,37 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
         
         # 加密方式
         cipher = proxy.get('cipher', 'auto')
+        ss_plugin = proxy.get('plugin')
+        ss_plugin_opts_raw = proxy.get('plugin-opts', proxy.get('plugin_opts'))
+        if isinstance(ss_plugin_opts_raw, dict):
+            ss_plugin_opts = ";".join(
+                f"{key}={value}" if value not in (True, False, None, "") else str(key)
+                for key, value in ss_plugin_opts_raw.items()
+            ) or None
+        else:
+            ss_plugin_opts = str(ss_plugin_opts_raw).strip() if ss_plugin_opts_raw else None
+        ss_uot = proxy.get('udp-over-tcp', proxy.get('uot'))
+        if isinstance(ss_uot, str):
+            normalized_uot = ss_uot.strip().lower()
+            if normalized_uot in ('1', 'true', 'yes', 'on'):
+                ss_uot = True
+            elif normalized_uot in ('0', 'false', 'no', 'off'):
+                ss_uot = False
+        ss_uot_version = proxy.get('udp-over-tcp-version', proxy.get('uot-version', proxy.get('uotVersion', proxy.get('UoTVersion'))))
+        hy_alpn = proxy.get('alpn')
+        if isinstance(hy_alpn, list):
+            hy_alpn = ",".join(str(item).strip() for item in hy_alpn if str(item).strip()) or None
+        elif hy_alpn is not None:
+            hy_alpn = str(hy_alpn).strip() or None
+        hy_obfs = proxy.get('obfs')
+        hy_obfs_password = proxy.get('obfs-password', proxy.get('obfs_password'))
         
-        # Trojan 默认启用 TLS
-        if protocol == Protocol.TROJAN:
+        # Trojan / Hysteria2 默认启用 TLS
+        if protocol in (Protocol.TROJAN, Protocol.HYSTERIA2):
             tls = True
+        if protocol == Protocol.HYSTERIA2:
+            tls = True
+            network = NetworkType.HYSTERIA
         
         return ProxyNode(
             name=name,
@@ -706,6 +440,13 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             allow_insecure=skip_cert_verify,
             path=path if path else None,
             host=host if host else None,
+            hy_obfs=hy_obfs,
+            hy_obfs_password=hy_obfs_password,
+            hy_alpn=hy_alpn,
+            ss_plugin=ss_plugin,
+            ss_plugin_opts=ss_plugin_opts,
+            ss_uot=ss_uot if isinstance(ss_uot, bool) else (bool(ss_uot) if ss_uot is not None else None),
+            ss_uot_version=int(ss_uot_version) if ss_uot_version not in (None, "") else None,
         )
         
     except Exception as e:

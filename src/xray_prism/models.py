@@ -17,31 +17,20 @@ class Protocol(Enum):
     VLESS = "vless"
     SHADOWSOCKS = "shadowsocks"
     TROJAN = "trojan"
+    HYSTERIA2 = "hysteria2"
     SSR = "ssr"
-
-
-RUNTIME_SUPPORTED_PROTOCOLS = frozenset({
-    Protocol.VMESS,
-    Protocol.VLESS,
-    Protocol.SHADOWSOCKS,
-    Protocol.TROJAN,
-})
 
 
 def is_runtime_supported_protocol(protocol: Protocol | str) -> bool:
     """Return whether the current runtime can generate and run this protocol."""
-    normalized = protocol if isinstance(protocol, Protocol) else Protocol(str(protocol))
-    return normalized in RUNTIME_SUPPORTED_PROTOCOLS
+    from .capabilities import is_runtime_supported
+    return is_runtime_supported(protocol)
 
 
 def get_runtime_support_reason(protocol: Protocol | str) -> Optional[str]:
     """Return the runtime support note for a protocol, if any."""
-    normalized = protocol if isinstance(protocol, Protocol) else Protocol(str(protocol))
-    if is_runtime_supported_protocol(normalized):
-        return None
-    if normalized == Protocol.SSR:
-        return "当前 Xray 不支持 SSR（ShadowsocksR）协议"
-    return f"当前 Xray 运行链路未支持协议 {normalized.value}"
+    from .capabilities import get_runtime_support_reason as _get_runtime_support_reason
+    return _get_runtime_support_reason(protocol)
 
 
 class NetworkType(Enum):
@@ -51,6 +40,7 @@ class NetworkType(Enum):
     GRPC = "grpc"
     H2 = "h2"
     KCP = "kcp"
+    HYSTERIA = "hysteria"
 
 
 @dataclass
@@ -100,6 +90,17 @@ class ProxyNode:
     # Reality 专用
     public_key: Optional[str] = None
     short_id: Optional[str] = None
+
+    # Hysteria2 专用
+    hy_obfs: Optional[str] = None
+    hy_obfs_password: Optional[str] = None
+    hy_alpn: Optional[str] = None
+
+    # Shadowsocks 专用
+    ss_plugin: Optional[str] = None
+    ss_plugin_opts: Optional[str] = None
+    ss_uot: Optional[bool] = None
+    ss_uot_version: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """

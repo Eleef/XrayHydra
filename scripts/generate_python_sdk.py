@@ -192,6 +192,11 @@ def typed_dict_body(spec: dict[str, Any]) -> str:
 
     for name in schema_names:
         schema = components[name]
+        if "enum" in schema and schema.get("type") != "object":
+            values = ", ".join(repr(item) for item in schema["enum"])
+            lines.append(f"{name} = Literal[{values}]")
+            lines.append("")
+            continue
         if schema.get("type") != "object":
             continue
 

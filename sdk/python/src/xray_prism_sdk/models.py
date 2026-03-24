@@ -73,6 +73,8 @@ class CustomGroupResponse(TypedDict):
     created_at: str
     updated_at: str
 
+GroupType = Literal['subscription', 'custom']
+
 class HealthConfigResponse(TypedDict):
     """Response model for health monitoring config."""
     enabled: bool
@@ -90,6 +92,8 @@ class HealthConfigUpdate(TypedDict):
     test_target: NotRequired[str | None]
     test_timeout_seconds: NotRequired[int | None]
 
+HealthStatusEnum = Literal['healthy', 'degraded', 'disabled']
+
 class HealthStatusListResponse(TypedDict):
     """Response model for list of health states."""
     states: list[ProxyHealthResponse]
@@ -102,7 +106,7 @@ class LeaseAcquireRequest(TypedDict):
     """Request model for acquiring a proxy lease."""
     workspace_id: str
     ttl: NotRequired[int]
-    initial_port_ordering: NotRequired[Literal['random', 'port_asc']]
+    initial_port_ordering: NotRequired[LeaseInitialPortOrdering]
 
 class LeaseAcquireResponse(TypedDict):
     """Response model for successful lease acquisition."""
@@ -127,6 +131,8 @@ class LeaseCooldownRequest(TypedDict):
     """Request model for manual cooldown/recall operations."""
     workspace_id: str
     proxy_port: int
+
+LeaseInitialPortOrdering = Literal['random', 'port_asc']
 
 class LeaseReleaseRequest(TypedDict):
     """Request model for releasing a proxy lease."""
@@ -196,6 +202,8 @@ class NodeResponse(TypedDict):
     latency_ms: NotRequired[int | None]
     exit_ip: NotRequired[str | None]
     exit_country: NotRequired[str | None]
+    runtime_supported: NotRequired[bool]
+    runtime_support_reason: NotRequired[str | None]
     in_proxy_pool: NotRequired[bool]
     proxy_port: NotRequired[int | None]
 
@@ -218,6 +226,8 @@ class NodeTestJobResponse(TypedDict):
     results: NotRequired[list[NodeTestResult]]
     error: NotRequired[str | None]
 
+NodeTestJobStatus = Literal['queued', 'running', 'completed', 'failed']
+
 class NodeTestRequest(TypedDict):
     """Request model for testing subscription nodes."""
     node_ids: list[str]
@@ -237,6 +247,8 @@ class NodeTestResult(TypedDict):
     test_profile: NotRequired[str | None]
     tested_target: NotRequired[str | None]
     successful_target: NotRequired[str | None]
+
+ProtocolType = Literal['vmess', 'vless', 'shadowsocks', 'trojan', 'hysteria2', 'ssr']
 
 class ProxyAddRequest(TypedDict):
     """Request model for adding nodes to proxy list."""
@@ -298,6 +310,8 @@ class ProxyListResponse(TypedDict):
     proxies: list[ProxyResponse]
     total: int
     xray_status: XrayStatus
+
+ProxyPoolStatus = Literal['active', 'dedupe_disabled']
 
 class ProxyResponse(TypedDict):
     """Response model for active proxy."""
@@ -365,6 +379,8 @@ class SystemStatusResponse(TypedDict):
     subscription_count: int
     uptime_seconds: NotRequired[int | None]
 
+TestStatus = Literal['pending', 'testing', 'success', 'failed']
+
 class TestTargetPreset(TypedDict):
     """Preset test target."""
     name: str
@@ -387,3 +403,5 @@ class WorkspaceResetResponse(TypedDict):
     workspace_id: str
     released_count: int
     recalled_count: int
+
+XrayStatus = Literal['running', 'stopped', 'starting', 'error']

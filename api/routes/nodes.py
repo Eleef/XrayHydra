@@ -10,6 +10,7 @@ from api.schemas.models import (
     NodeResponse,
     ErrorResponse,
 )
+from api.routes.node_response_builder import build_node_response
 from api.services.custom_group_service import get_custom_group_service
 from api.services.node_test_service import get_node_test_service
 from api.services.proxy_service import get_proxy_service
@@ -36,20 +37,11 @@ def _build_node_response(node: dict, proxy_port_map: dict[str, int]) -> NodeResp
     else:
         group_id = str(node.get("group_id") or "")
         group_type = "custom"
-    return NodeResponse(
-        id=node["id"],
+    return build_node_response(
+        node,
         group_id=group_id,
         group_type=group_type,
         subscription_id=subscription_id,
-        name=node["name"],
-        protocol=node["protocol"],
-        address=node["address"],
-        port=node["port"],
-        test_status=node.get("test_status", "pending"),
-        latency_ms=node.get("latency_ms"),
-        exit_ip=node.get("exit_ip"),
-        exit_country=node.get("exit_country"),
-        in_proxy_pool=proxy_port is not None,
         proxy_port=proxy_port,
     )
 

@@ -24,6 +24,7 @@ from api.services.proxy_service import get_proxy_service
 from api.services.custom_group_service import get_custom_group_service
 from api.services.subscription_service import get_subscription_service
 from src.xray_prism.generator import ConfigGenerator
+from src.xray_prism.capabilities import evaluate_node_runtime
 from src.xray_prism.models import (
     NetworkType,
     PortMapping,
@@ -189,7 +190,7 @@ class NodeTestService:
 
     @staticmethod
     def _to_proxy_node(node: Dict[str, object]) -> ProxyNode:
-        return ProxyNode(
+        proxy_node = ProxyNode(
             name=str(node["name"]),
             protocol=Protocol(str(node["protocol"])),
             address=str(node["address"]),
@@ -209,7 +210,18 @@ class NodeTestService:
             flow=node.get("flow"),
             public_key=node.get("public_key"),
             short_id=node.get("short_id"),
+            hy_obfs=node.get("hy_obfs"),
+            hy_obfs_password=node.get("hy_obfs_password"),
+            hy_alpn=node.get("hy_alpn"),
+            ss_plugin=node.get("ss_plugin"),
+            ss_plugin_opts=node.get("ss_plugin_opts"),
+            ss_uot=node.get("ss_uot"),
+            ss_uot_version=node.get("ss_uot_version"),
         )
+        capability = evaluate_node_runtime(proxy_node)
+        if not capability.runtime_supported:
+            raise ValueError(capability.reason or f"当前 Xray 不支持协议 {proxy_node.protocol.value}")
+        return proxy_node
 
     @staticmethod
     def _find_available_ports(count: int, excluded: set[int], start: int = 20000) -> List[int]:

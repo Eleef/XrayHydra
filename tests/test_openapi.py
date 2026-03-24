@@ -155,9 +155,15 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("in_proxy_pool", node_props)
         self.assertIn("proxy_port", node_props)
         self.assertIn("subscription_id", node_props)
+        self.assertIn("runtime_supported", node_props)
+        self.assertIn("runtime_support_reason", node_props)
         self.assertIn("group_id", node_props)
         self.assertIn("group_type", node_props)
         self.assertIn("subscription_id", node_props)
+        protocol_enum_name = node_props["protocol"]["$ref"].rsplit("/", 1)[-1]
+        protocol_enum = schemas[protocol_enum_name]["enum"]
+        self.assertIn("hysteria2", protocol_enum)
+        self.assertIn("ssr", protocol_enum)
 
         self.assertIn("/api/nodes/test", spec["paths"])
         test_operation = spec["paths"]["/api/nodes/test"]["post"]

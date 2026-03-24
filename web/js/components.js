@@ -84,19 +84,27 @@ const Components = {
     nodeItem(node, isSelected = false, options = {}) {
         const div = document.createElement('div');
         const inProxyPool = Boolean(node.in_proxy_pool);
-        const disableNodeCheckbox = Boolean(options.disableNodeCheckbox || inProxyPool);
-        const disableTestButton = Boolean(options.disableTestButton);
-        const disableCopyToGroup = Boolean(options.disableCopyToGroup);
+        const runtimeUnsupported = node?.runtime_supported === false;
+        const runtimeSupportReason = node?.runtime_support_reason || '当前运行环境不支持此协议';
+        const disableNodeCheckbox = Boolean(options.disableNodeCheckbox || inProxyPool || runtimeUnsupported);
+        const disableTestButton = Boolean(options.disableTestButton || runtimeUnsupported);
+        const disableCopyToGroup = Boolean(options.disableCopyToGroup || runtimeUnsupported);
         const showRemoveFromGroup = Boolean(options.showRemoveFromGroup);
         const disableRemoveFromGroup = Boolean(options.disableRemoveFromGroup);
-        div.className = `node-item${isSelected ? ' selected' : ''}${inProxyPool ? ' in-proxy-pool' : ''}`;
+        div.className = `node-item${isSelected ? ' selected' : ''}${inProxyPool ? ' in-proxy-pool' : ''}${runtimeUnsupported ? ' unsupported-protocol' : ''}`;
         div.dataset.id = node.id;
 
         const statusIcon = this.getStatusIcon(node.test_status);
         const statusText = this.getStatusText(node.test_status, node.latency_ms);
-        const diagnostics = this.getNodeDiagnostics(node);
+        const diagnostics = this.getNodeDiagnostics(node, {
+            runtimeUnsupported,
+            runtimeSupportReason,
+        });
         const pooledTag = inProxyPool
             ? `<span class="node-pool-tag">已入池${node.proxy_port ? ` :${node.proxy_port}` : ''}</span>`
+            : '';
+        const unsupportedTag = runtimeUnsupported
+            ? `<span class="node-unsupported-tag" title="${this.escapeHtml(runtimeSupportReason)}">不兼容</span>`
             : '';
 
         div.innerHTML = `
@@ -107,6 +115,7 @@ const Components = {
                     <span class="node-protocol">${node.protocol}</span>
                     <span>${this.escapeHtml(node.address)}:${node.port}</span>
                     ${pooledTag}
+                    ${unsupportedTag}
                 </div>
                 ${diagnostics}
             </div>
@@ -115,13 +124,13 @@ const Components = {
                     ${statusIcon}
                     <span>${statusText}</span>
                 </div>
-                <button class="btn btn-icon btn-sm node-test-btn" data-node-action="test" title="测试节点" ${disableTestButton ? 'disabled' : ''}>
+                <button class="btn btn-icon btn-sm node-test-btn" data-node-action="test" title="${runtimeUnsupported ? this.escapeHtml(runtimeSupportReason) : '测试节点'}" ${disableTestButton ? 'disabled' : ''}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
                     </svg>
                 </button>
-                <button class="btn btn-icon btn-sm node-copy-btn" data-node-action="copy-to-group" title="复制到分组" ${disableCopyToGroup ? 'disabled' : ''}>
+                <button class="btn btn-icon btn-sm node-copy-btn" data-node-action="copy-to-group" title="${runtimeUnsupported ? this.escapeHtml(runtimeSupportReason) : '复制到分组'}" ${disableCopyToGroup ? 'disabled' : ''}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="8" y="8" width="10" height="10" rx="2"></rect>
                         <path d="M5 7V4a2 2 0 0 1 2-2h7"></path>
@@ -298,13 +307,23 @@ const Components = {
         return texts[status] || '未知';
     },
 
-    getNodeDiagnostics(node) {
+    getNodeDiagnostics(node, options = {}) {
         const status = node?.test_status || 'pending';
         const successfulTarget = node?.successful_target || node?.test_target || node?.target_hit || null;
         const testedTarget = node?.tested_target || node?.last_test_target || null;
         const failureReason = node?.test_error || node?.error || node?.error_message || null;
+        const runtimeUnsupported = Boolean(options.runtimeUnsupported);
+        const runtimeSupportReason = options.runtimeSupportReason || '当前运行环境不支持此协议';
 
         const rows = [];
+        if (runtimeUnsupported) {
+            rows.push(`
+                <div class="node-diagnostic unsupported">
+                    <span class="node-diagnostic-label">不可用原因</span>
+                    <span class="node-diagnostic-value">${this.escapeHtml(runtimeSupportReason)}</span>
+                </div>
+            `);
+        }
         if (status === 'success' && successfulTarget) {
             rows.push(`
                 <div class="node-diagnostic success">

@@ -122,12 +122,43 @@ class TestNodesApi(unittest.TestCase):
         self.assertIn("group_id", payload["nodes"][0])
         self.assertIn("group_type", payload["nodes"][0])
         self.assertIn("subscription_id", payload["nodes"][0])
+        self.assertIn("runtime_supported", payload["nodes"][0])
+        self.assertIn("runtime_support_reason", payload["nodes"][0])
         self.assertEqual(payload["nodes"][0]["group_type"], "subscription")
         self.assertEqual(payload["nodes"][0]["group_id"], "sub_demo")
+        self.assertTrue(payload["nodes"][0]["runtime_supported"])
         self.assertIsInstance(payload["nodes"][0]["in_proxy_pool"], bool)
         self.assertTrue(
             payload["nodes"][0]["proxy_port"] is None or isinstance(payload["nodes"][0]["proxy_port"], int)
         )
+
+    def test_list_subscription_nodes_marks_plugin_shadowsocks_as_runtime_unsupported(self):
+        fake_service = MagicMock()
+        fake_service.get_subscription.return_value = {"id": "sub_demo", "name": "demo", "url": "https://example.com"}
+        fake_service.get_nodes_by_subscription.return_value = [{
+            "id": "node_ss_plugin",
+            "subscription_id": "sub_demo",
+            "name": "SS-Plugin",
+            "protocol": "shadowsocks",
+            "address": "ss.example.com",
+            "port": 8388,
+            "password": "pass",
+            "security": "aes-128-gcm",
+            "ss_plugin": "v2ray-plugin",
+            "ss_plugin_opts": "mode=websocket",
+            "test_status": "pending",
+        }]
+        fake_proxy_service = MagicMock()
+        fake_proxy_service.get_all_proxies.return_value = []
+
+        with patch("api.routes.subscriptions.get_subscription_service", return_value=fake_service), \
+             patch("api.routes.subscriptions.get_proxy_service", return_value=fake_proxy_service):
+            response = self.client.get("/api/subscriptions/sub_demo/nodes")
+
+        self.assertEqual(response.status_code, 200)
+        node = response.json()["nodes"][0]
+        self.assertFalse(node["runtime_supported"])
+        self.assertIn("Shadowsocks plugin", node["runtime_support_reason"])
 
     def test_test_nodes_defaults_to_multi_target_and_does_not_touch_main_runner(self):
         fake_test_service = _FakeNodeTestService()

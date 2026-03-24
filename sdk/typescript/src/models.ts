@@ -69,6 +69,8 @@ export interface CustomGroupResponse {
   updated_at: string;
 }
 
+export type GroupType = "subscription" | "custom";
+
 export interface HealthConfigResponse {
   enabled: boolean;
   check_interval_seconds: number;
@@ -86,6 +88,8 @@ export interface HealthConfigUpdate {
   test_timeout_seconds?: number | unknown;
 }
 
+export type HealthStatusEnum = "healthy" | "degraded" | "disabled";
+
 export interface HealthStatusListResponse {
   states: Array<ProxyHealthResponse>;
   total: number;
@@ -97,7 +101,7 @@ export interface HealthStatusListResponse {
 export interface LeaseAcquireRequest {
   workspace_id: string;
   ttl?: number;
-  initial_port_ordering?: 'random' | 'port_asc';
+  initial_port_ordering?: LeaseInitialPortOrdering;
 }
 
 export interface LeaseAcquireResponse {
@@ -123,6 +127,8 @@ export interface LeaseCooldownRequest {
   workspace_id: string;
   proxy_port: number;
 }
+
+export type LeaseInitialPortOrdering = "random" | "port_asc";
 
 export interface LeaseReleaseRequest {
   workspace_id: string;
@@ -191,6 +197,8 @@ export interface NodeResponse {
   latency_ms?: number | unknown;
   exit_ip?: string | unknown;
   exit_country?: string | unknown;
+  runtime_supported?: boolean;
+  runtime_support_reason?: string | unknown;
   in_proxy_pool?: boolean;
   proxy_port?: number | unknown;
 }
@@ -214,6 +222,8 @@ export interface NodeTestJobResponse {
   error?: string | unknown;
 }
 
+export type NodeTestJobStatus = "queued" | "running" | "completed" | "failed";
+
 export interface NodeTestRequest {
   node_ids: Array<string>;
   timeout?: number;
@@ -233,6 +243,8 @@ export interface NodeTestResult {
   tested_target?: string | unknown;
   successful_target?: string | unknown;
 }
+
+export type ProtocolType = "vmess" | "vless" | "shadowsocks" | "trojan" | "hysteria2" | "ssr";
 
 export interface ProxyAddRequest {
   node_ids: Array<string>;
@@ -294,6 +306,8 @@ export interface ProxyListResponse {
   total: number;
   xray_status: XrayStatus;
 }
+
+export type ProxyPoolStatus = "active" | "dedupe_disabled";
 
 export interface ProxyResponse {
   port: number;
@@ -361,6 +375,8 @@ export interface SystemStatusResponse {
   uptime_seconds?: number | unknown;
 }
 
+export type TestStatus = "pending" | "testing" | "success" | "failed";
+
 export interface TestTargetPreset {
   name: string;
   url: string;
@@ -383,3 +399,5 @@ export interface WorkspaceResetResponse {
   released_count: number;
   recalled_count: number;
 }
+
+export type XrayStatus = "running" | "stopped" | "starting" | "error";

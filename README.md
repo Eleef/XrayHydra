@@ -16,8 +16,10 @@
 
 ## 协议支持
 
-- 可运行协议：`vmess` / `vless` / `shadowsocks` / `trojan`（支持 Clash YAML）。
-- `ssr://`：会被识别用于清晰报错，但不会导入运行（Xray 不支持 SSR 出站）。
+- 可运行协议：`vmess` / `vless` / `shadowsocks` / `trojan` / `hysteria2`。
+- `shadowsocks`：支持基础 `ss://`、SIP002 变体以及 `UoT` / `UoTVersion`；带当前未映射 `plugin` 的 SS 节点会保留显示，但灰色不可选。
+- `ssr://`：会被识别并显示在节点列表中，但不会进入运行链路（Xray 不支持 SSR 出站）。
+- 识别到的节点不等于可运行节点；前端会依据 API 返回的 `runtime_supported` / `runtime_support_reason` 做灰显与拦截。
 
 ## 快速开始
 
