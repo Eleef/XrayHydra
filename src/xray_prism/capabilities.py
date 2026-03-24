@@ -39,6 +39,67 @@ def _get_node_field(node: Any, field: str) -> Any:
     return getattr(node, field, None)
 
 
+def _normalize_optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _unsupported_reason(reason: str) -> RuntimeCapability:
+    return RuntimeCapability(
+        recognized=True,
+        runtime_supported=False,
+        support_level="unsupported",
+        reason=reason,
+    )
+
+
+def _evaluate_shadowsocks_runtime(node: Any) -> RuntimeCapability:
+    plugin = _normalize_optional_text(_get_node_field(node, "ss_plugin"))
+    plugin_opts = _normalize_optional_text(_get_node_field(node, "ss_plugin_opts"))
+    if plugin:
+        return _unsupported_reason(
+            f"当前 Xray 运行链路未支持该 Shadowsocks plugin: {plugin}"
+        )
+    if plugin_opts:
+        return _unsupported_reason(
+            "当前 Xray 运行链路未支持该 Shadowsocks plugin 扩展参数"
+        )
+
+    method = _normalize_optional_text(_get_node_field(node, "security"))
+    if not method or method == "auto":
+        return _unsupported_reason(
+            "当前 Shadowsocks 节点缺少可运行的加密方法"
+        )
+
+    password = _normalize_optional_text(_get_node_field(node, "password"))
+    if not password:
+        return _unsupported_reason(
+            "当前 Shadowsocks 节点缺少可运行的密码信息"
+        )
+
+    uot_version = _get_node_field(node, "ss_uot_version")
+    if uot_version is not None:
+        try:
+            version = int(uot_version)
+        except (TypeError, ValueError):
+            return _unsupported_reason(
+                "当前 Shadowsocks 节点 UoTVersion 格式无效"
+            )
+        if version <= 0:
+            return _unsupported_reason(
+                "当前 Shadowsocks 节点 UoTVersion 必须大于 0"
+            )
+
+    return RuntimeCapability(
+        recognized=True,
+        runtime_supported=True,
+        support_level="native",
+        reason=None,
+    )
+
+
 def normalize_protocol(protocol: Protocol | str) -> Optional[Protocol]:
     """Normalize protocol-like input into a Protocol enum, if recognized."""
     try:
@@ -87,16 +148,7 @@ def evaluate_node_runtime(node: Any) -> RuntimeCapability:
 
     normalized = normalize_protocol(protocol)
     if normalized == Protocol.SHADOWSOCKS:
-        plugin = _get_node_field(node, "ss_plugin")
-        if plugin:
-            plugin_name = str(plugin).strip()
-            if plugin_name:
-                return RuntimeCapability(
-                    recognized=True,
-                    runtime_supported=False,
-                    support_level="unsupported",
-                    reason=f"当前 Xray 运行链路未支持该 Shadowsocks plugin: {plugin_name}",
-                )
+        return _evaluate_shadowsocks_runtime(node)
 
     return capability
 

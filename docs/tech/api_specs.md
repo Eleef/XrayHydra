@@ -372,6 +372,15 @@ Last Updated: 2026-03-22
 *   **Endpoint**: `POST /`
 *   **OperationId**: `createSubscription`
 *   **Summary**: 添加订阅并立即抓取节点；如果抓取或解析失败，请求返回错误且不会创建空订阅记录。
+*   **Input Compatibility (Mainstream)**:
+    *   多行 URI、Base64 文本订阅
+    *   Clash YAML / provider 常见结构
+    *   SIP008 / SIP002 Shadowsocks 主流分享形态
+    *   v2rayN / v2rayNG 常见订阅导入形态（映射到当前支持的主流协议）
+*   **Runtime Boundary**:
+    *   运行后端固定为 Xray-only。
+    *   解析识别到的节点会完整返回；是否可运行由 `runtime_supported` / `runtime_support_reason` 标记决定。
+    *   当前不可运行节点（例如 `ssr`、未映射 `plugin` 的 `shadowsocks`）保持可见但灰显不可选。
 *   **Request**:
     ```json
     {

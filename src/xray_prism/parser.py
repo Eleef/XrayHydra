@@ -8,7 +8,6 @@ Xray-Prism 核心解析层
 import logging
 import re
 from typing import List, Optional, Dict, Any
-from urllib.parse import unquote
 
 # 尝试导入 PyYAML 用于解析 Clash 格式
 try:
@@ -223,6 +222,8 @@ def parse_subscription(content: str, filter_nodes: bool = True) -> List[ProxyNod
             logger.info(f"过滤掉 {filtered_count} 个元数据节点，剩余 {len(nodes)} 个有效节点")
     
     return nodes
+
+
 def _parse_clash_yaml(content: str) -> List[ProxyNode]:
     """
     解析 Clash YAML 格式配置
@@ -239,8 +240,8 @@ def _parse_clash_yaml(content: str) -> List[ProxyNode]:
     if yaml is not None:
         try:
             config = yaml.safe_load(content)
-            if config and 'proxies' in config:
-                proxies = config['proxies']
+            proxies = _extract_clash_proxies(config)
+            if proxies:
                 for i, proxy in enumerate(proxies, 1):
                     node = _parse_clash_proxy(proxy)
                     if node:
@@ -256,6 +257,28 @@ def _parse_clash_yaml(content: str) -> List[ProxyNode]:
     
     # 回退到正则解析（无需 PyYAML）
     return _parse_clash_regex(content)
+
+
+def _extract_clash_proxies(config: Any) -> List[Dict[str, Any]]:
+    """Extract proxy list from mainstream Clash/provider payload shapes."""
+    if not config:
+        return []
+
+    if isinstance(config, list):
+        return [item for item in config if isinstance(item, dict)]
+
+    if not isinstance(config, dict):
+        return []
+
+    for key in ("proxies", "Proxy", "proxy", "payload"):
+        raw = config.get(key)
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        if isinstance(raw, dict):
+            values = [item for item in raw.values() if isinstance(item, dict)]
+            if values:
+                return values
+    return []
 
 
 def _parse_clash_regex(content: str) -> List[ProxyNode]:
@@ -345,8 +368,8 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
     try:
         name = proxy.get('name', 'Unknown')
         proxy_type = proxy.get('type', '').lower()
-        server = proxy.get('server', '')
-        port = proxy.get('port', 0)
+        server = proxy.get('server', proxy.get('address', ''))
+        port = proxy.get('port', proxy.get('server_port', 0))
         
         if not server or not port:
             return None
@@ -357,6 +380,7 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             'vmess': Protocol.VMESS,
             'vless': Protocol.VLESS,
             'ss': Protocol.SHADOWSOCKS,
+            'ss2022': Protocol.SHADOWSOCKS,
             'shadowsocks': Protocol.SHADOWSOCKS,
             'hysteria2': Protocol.HYSTERIA2,
             'hy2': Protocol.HYSTERIA2,
@@ -370,10 +394,16 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
         # 提取通用字段
         password = proxy.get('password', '') or proxy.get('auth-str', '') or proxy.get('auth_str', '')
         uuid = proxy.get('uuid', '')
-        
+        alter_id = proxy.get('alterId', proxy.get('alter-id', proxy.get('alter_id', 0)))
+        try:
+            alter_id = int(alter_id or 0)
+        except (TypeError, ValueError):
+            alter_id = 0
+
         # TLS 相关
         tls = proxy.get('tls', False)
         sni = proxy.get('sni', proxy.get('servername', ''))
+        fingerprint = proxy.get('client-fingerprint', proxy.get('fingerprint'))
         skip_cert_verify = proxy.get('skip-cert-verify', False)
         if protocol == Protocol.HYSTERIA2:
             tls = True
@@ -386,11 +416,38 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             network = NetworkType.HYSTERIA
         
         # WebSocket 相关
-        ws_opts = proxy.get('ws-opts', {})
+        ws_opts = proxy.get('ws-opts', proxy.get('ws_opts', {}))
         path = ws_opts.get('path', proxy.get('ws-path', ''))
         host = ''
         if ws_opts.get('headers'):
-            host = ws_opts['headers'].get('Host', '')
+            headers = ws_opts['headers']
+            host = headers.get('Host', headers.get('host', ''))
+
+        # gRPC 相关
+        grpc_opts = proxy.get('grpc-opts', proxy.get('grpc_opts', {}))
+        service_name = (
+            grpc_opts.get('grpc-service-name')
+            or grpc_opts.get('serviceName')
+            or proxy.get('grpc-service-name')
+            or proxy.get('serviceName')
+            or proxy.get('service_name')
+            or ''
+        )
+
+        # Reality 相关
+        reality_opts = proxy.get('reality-opts', proxy.get('reality_opts', {}))
+        public_key = (
+            proxy.get('public-key')
+            or proxy.get('public_key')
+            or reality_opts.get('public-key')
+            or reality_opts.get('public_key')
+        )
+        short_id = (
+            proxy.get('short-id')
+            or proxy.get('short_id')
+            or reality_opts.get('short-id')
+            or reality_opts.get('short_id')
+        )
         
         # 加密方式
         cipher = proxy.get('cipher', 'auto')
@@ -437,9 +494,14 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             network=network,
             tls=tls,
             sni=sni if sni else None,
+            fingerprint=fingerprint if fingerprint else None,
             allow_insecure=skip_cert_verify,
             path=path if path else None,
             host=host if host else None,
+            alter_id=alter_id,
+            service_name=service_name if service_name else None,
+            public_key=public_key if public_key else None,
+            short_id=short_id if short_id else None,
             hy_obfs=hy_obfs,
             hy_obfs_password=hy_obfs_password,
             hy_alpn=hy_alpn,

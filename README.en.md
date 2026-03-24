@@ -16,8 +16,10 @@ Map each subscription node to its own local port. Includes batch testing, proxy-
 
 ## Protocol Support
 
+- Subscription input compatibility (mainstream): multi-line URI, Base64 text subscriptions, Clash YAML/provider, SIP008 / SIP002 Shadowsocks sharing shapes, and common v2rayN/v2rayNG import shapes (covering mainstream `vmess` / `vless` / `shadowsocks` / `trojan` / `hysteria2` subsets).
+- Runtime boundary: Xray-only runtime backend. "Recognized" and "runnable" are intentionally separated stages.
 - Runtime-supported: `vmess` / `vless` / `shadowsocks` / `trojan` / `hysteria2`.
-- `shadowsocks`: supports basic `ss://`, SIP002 variants, and `UoT` / `UoTVersion`; SS nodes that require an unmapped `plugin` are still listed, but stay greyed out and non-runnable.
+- `shadowsocks`: supports basic `ss://`, mainstream SIP002 / SIP008 variants, and `UoT` / `UoTVersion`; SS nodes that require an unmapped `plugin` are still listed, but stay greyed out and non-runnable.
 - `ssr://`: recognized and kept visible in the node list, but never enters the runtime path (Xray does not support SSR outbounds).
 - Recognized nodes are not the same as runtime-supported nodes; the frontend relies on `runtime_supported` / `runtime_support_reason` from the API to grey out unsupported entries.
 

@@ -73,17 +73,44 @@ def parse_shadowsocks(uri: str) -> ProxyNode:
     2. ss://base64(method:password@host:port)#name
     """
     try:
+        uri = uri.strip()
         parsed = urlparse(uri)
-        name = unquote(parsed.fragment) if parsed.fragment else "Unknown"
         params = parse_qs(parsed.query, keep_blank_values=True)
+        if parsed.fragment:
+            name = unquote(parsed.fragment)
+        elif params.get("remarks", [None])[0]:
+            name = unquote(str(params.get("remarks", [None])[0]))
+        else:
+            name = "Unknown"
         plugin, plugin_opts = _parse_plugin(params.get("plugin", [None])[0])
+        if plugin is None:
+            plugin = params.get("plugin_name", params.get("plugin-name", [None]))[0]
+        if plugin_opts is None:
+            plugin_opts = params.get("plugin_opts", params.get("plugin-opts", [None]))[0]
+            if plugin_opts is not None:
+                plugin_opts = unquote(str(plugin_opts)).strip() or None
         ss_uot = _parse_optional_bool(
-            params.get("uot", params.get("udp-over-tcp", [None]))[0]
+            params.get(
+                "uot",
+                params.get(
+                    "udp-over-tcp",
+                    params.get("udp_over_tcp", params.get("UoT", [None])),
+                ),
+            )[0]
         )
         ss_uot_version = _parse_optional_int(
             params.get(
                 "UoTVersion",
-                params.get("uotVersion", params.get("uot-version", params.get("udp-over-tcp-version", [None]))),
+                params.get(
+                    "uotVersion",
+                    params.get(
+                        "uot-version",
+                        params.get(
+                            "udp-over-tcp-version",
+                            params.get("udp_over_tcp_version", [None]),
+                        ),
+                    ),
+                ),
             )[0]
         )
 

@@ -112,7 +112,16 @@ class ProxyHealthState:
     penalty_until: datetime # 罚时结束时间
 ```
 
-## **6. Protocol Recognition vs Runtime Support**
+## **6. Input Compatibility & Runtime Boundary**
+
+订阅输入层面，系统当前覆盖的主流形态包括：
+- 多行 URI（`vmess://` / `vless://` / `ss://` / `trojan://` / `hysteria2://` / `hy2://` / `ssr://`）
+- Base64 文本订阅
+- Clash YAML / provider 常见结构
+- SIP008 / SIP002 Shadowsocks 主流分享形态
+- v2rayN / v2rayNG 常见订阅导入形态（映射到上述主流协议子集）
+
+运行层边界固定为 Xray-only：只要不能映射到当前 Xray 运行链路，就不会进入代理池与测试链路，但会保留在节点列表用于可视化诊断。
 
 解析层当前可以识别 `vmess`、`vless`、`shadowsocks`、`trojan`、`hysteria2` 和 `ssr`。运行层当前接受 `RUNTIME_SUPPORTED_PROTOCOLS` 中的协议，也就是 `vmess/vless/shadowsocks/trojan/hysteria2`。
 

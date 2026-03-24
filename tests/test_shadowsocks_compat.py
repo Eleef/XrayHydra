@@ -53,6 +53,69 @@ class TestShadowsocksCompat(unittest.TestCase):
         self.assertFalse(capability.runtime_supported)
         self.assertIn("Shadowsocks plugin", capability.reason or "")
 
+    def test_shadowsocks_plugin_opts_without_plugin_is_runtime_unsupported(self):
+        node = ProxyNode(
+            name="SS-Plugin-Opts",
+            protocol=Protocol.SHADOWSOCKS,
+            address="example.com",
+            port=8388,
+            password="pass",
+            security="aes-128-gcm",
+            ss_plugin_opts="mode=websocket",
+        )
+
+        capability = evaluate_node_runtime(node)
+        self.assertFalse(capability.runtime_supported)
+        self.assertIn("plugin", capability.reason or "")
+
+    def test_shadowsocks_basic_ss2022_and_uot_are_runtime_supported(self):
+        basic_node = ProxyNode(
+            name="SS-Basic",
+            protocol=Protocol.SHADOWSOCKS,
+            address="example.com",
+            port=8388,
+            password="pass",
+            security="aes-128-gcm",
+        )
+        ss2022_node = ProxyNode(
+            name="SS-2022",
+            protocol=Protocol.SHADOWSOCKS,
+            address="example.com",
+            port=443,
+            password="base64-key-material",
+            security="2022-blake3-aes-256-gcm",
+        )
+        uot_node = ProxyNode(
+            name="SS-UOT",
+            protocol=Protocol.SHADOWSOCKS,
+            address="example.com",
+            port=8388,
+            password="pass",
+            security="aes-128-gcm",
+            ss_uot=True,
+            ss_uot_version=2,
+        )
+
+        self.assertTrue(evaluate_node_runtime(basic_node).runtime_supported)
+        self.assertTrue(evaluate_node_runtime(ss2022_node).runtime_supported)
+        self.assertTrue(evaluate_node_runtime(uot_node).runtime_supported)
+
+    def test_shadowsocks_invalid_uot_version_is_runtime_unsupported(self):
+        node = ProxyNode(
+            name="SS-UOT-Invalid",
+            protocol=Protocol.SHADOWSOCKS,
+            address="example.com",
+            port=8388,
+            password="pass",
+            security="aes-128-gcm",
+            ss_uot=True,
+            ss_uot_version=0,
+        )
+
+        capability = evaluate_node_runtime(node)
+        self.assertFalse(capability.runtime_supported)
+        self.assertIn("UoTVersion", capability.reason or "")
+
     def test_shadowsocks_outbound_includes_uot_fields(self):
         node = ProxyNode(
             name="SS-UOT",
@@ -69,6 +132,20 @@ class TestShadowsocksCompat(unittest.TestCase):
         server = outbound["settings"]["servers"][0]
         self.assertTrue(server["uot"])
         self.assertEqual(server["UoTVersion"], 2)
+
+    def test_shadowsocks_outbound_rejects_plugin_nodes(self):
+        node = ProxyNode(
+            name="SS-Plugin",
+            protocol=Protocol.SHADOWSOCKS,
+            address="example.com",
+            port=8388,
+            password="pass",
+            security="aes-128-gcm",
+            ss_plugin="v2ray-plugin",
+        )
+
+        with self.assertRaisesRegex(ValueError, "plugin"):
+            ConfigGenerator()._node_to_outbound(node, "out_10000")
 
     def test_subscription_service_persists_shadowsocks_extension_fields(self):
         node = ProxyNode(

@@ -1,6 +1,6 @@
 # **Xray-Prism Product Requirements**
 
-Last Updated: 2026-01-02
+Last Updated: 2026-03-24
 
 ## **1. Background & Value (背景与价值)**
 
@@ -12,7 +12,7 @@ Last Updated: 2026-01-02
 ### **Core Proxy Engine (核心代理引擎)**
 | ID | Feature Point | Description | Acceptance Criteria |
 | :---- | :---- | :---- | :---- |
-| F1 | 订阅解析 | 支持 vmess/vless/ss/trojan 协议及 Clash YAML 格式 | 能正确识别并解析节点信息，自动 Base64 解码 |
+| F1 | 订阅解析 | 支持主流订阅输入：多行 URI、Base64 文本、Clash YAML/provider、SIP008/SIP002 Shadowsocks 分享形态、v2rayN/v2rayNG 常见导入形态 | 能正确识别并解析主流 `vmess/vless/ss/trojan/hysteria2` 节点，并保留不兼容节点用于灰显展示 |
 | F2 | 端口映射 | 将每个节点映射为本地独立端口 (如 10000, 10001...) | Xray 配置文件生成正确，路由规则 1:1 绑定 |
 | F3 | 进程管理 | 自动下载并管理 Xray 内核进程 | 支持 Windows/Linux/macOS，自动拉起和优雅停止 |
 
@@ -45,4 +45,6 @@ Last Updated: 2026-01-02
 ## **4. Technical Constraints (技术限制)**
 
 * **Single Instance**: 同一时间只能运行一个 Xray 实例（配置文件锁定）。
-* **Protocol Support**: 暂不支持 Hysteria2 等最新协议。
+* **Runtime Backend**: 运行内核固定为 Xray-only，不引入其他运行内核。
+* **Recognition vs Runtime**: 识别到的节点不等于可运行节点；当前不可运行节点（如 `ssr`、未映射 `ss plugin`）需保留显示并灰色不可选。
+* **Protocol Runtime Scope**: 当前可运行协议为 `vmess/vless/shadowsocks/trojan/hysteria2`。

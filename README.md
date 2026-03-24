@@ -16,8 +16,10 @@
 
 ## 协议支持
 
+- 订阅输入兼容（主流）：多行 URI、Base64 文本订阅、Clash YAML / provider、SIP008 / SIP002 主流 Shadowsocks 分享形态，以及 v2rayN/v2rayNG 常见订阅导入形态（覆盖 `vmess` / `vless` / `shadowsocks` / `trojan` / `hysteria2` 主流子集）。
+- 运行后端边界：仅使用 Xray 作为运行内核（Xray-only）；“可识别”与“可运行”分层处理。
 - 可运行协议：`vmess` / `vless` / `shadowsocks` / `trojan` / `hysteria2`。
-- `shadowsocks`：支持基础 `ss://`、SIP002 变体以及 `UoT` / `UoTVersion`；带当前未映射 `plugin` 的 SS 节点会保留显示，但灰色不可选。
+- `shadowsocks`：支持基础 `ss://`、SIP002 / SIP008 主流变体以及 `UoT` / `UoTVersion`；带当前未映射 `plugin` 的 SS 节点会保留显示，但灰色不可选。
 - `ssr://`：会被识别并显示在节点列表中，但不会进入运行链路（Xray 不支持 SSR 出站）。
 - 识别到的节点不等于可运行节点；前端会依据 API 返回的 `runtime_supported` / `runtime_support_reason` 做灰显与拦截。
 
