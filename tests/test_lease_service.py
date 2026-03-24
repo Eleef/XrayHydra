@@ -187,7 +187,7 @@ class TestLeaseManager(unittest.TestCase):
 
     def test_timed_cooldown_batch_skips_active_lease(self):
         with patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]):
-            self.manager.acquire("workspace_a", ttl=60)
+            self.manager.acquire("workspace_a", ttl=60, initial_port_ordering="port_asc")
             result = self.manager.set_timed_cooldowns("workspace_a", [10001, 10002], 300)
 
         self.assertEqual(result["applied_ports"], [10002])
@@ -238,6 +238,24 @@ class TestLeaseManager(unittest.TestCase):
             result = manager.acquire("workspace_x", ttl=60)
 
         self.assertEqual(result.proxy_port, 10001)
+
+    def test_first_acquire_defaults_to_random_tie_break_for_never_used_ports(self):
+        manager = LeaseManager()
+        with patch.object(manager, "_get_healthy_ports", return_value=[10001, 10002, 10003]), \
+             patch("api.services.lease_service.random.choice", return_value=10003) as mock_choice:
+            result = manager.acquire("workspace_x", ttl=60)
+
+        self.assertEqual(result.proxy_port, 10003)
+        mock_choice.assert_called_once_with([10001, 10002, 10003])
+
+    def test_first_acquire_can_use_port_ascending_tie_break(self):
+        manager = LeaseManager()
+        with patch.object(manager, "_get_healthy_ports", return_value=[10003, 10001, 10002]), \
+             patch("api.services.lease_service.random.choice") as mock_choice:
+            result = manager.acquire("workspace_x", ttl=60, initial_port_ordering="port_asc")
+
+        self.assertEqual(result.proxy_port, 10001)
+        mock_choice.assert_not_called()
 
     def test_ttl_expiration(self):
         key = "workspace_a:10001"

@@ -108,7 +108,8 @@ async def acquire_lease(request: LeaseAcquireRequest):
     manager = get_lease_manager()
     result = manager.acquire(
         workspace_id=request.workspace_id,
-        ttl=request.ttl
+        ttl=request.ttl,
+        initial_port_ordering=request.initial_port_ordering.value,
     )
     
     if not result.success:

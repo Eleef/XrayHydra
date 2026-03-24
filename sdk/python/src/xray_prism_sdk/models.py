@@ -102,6 +102,7 @@ class LeaseAcquireRequest(TypedDict):
     """Request model for acquiring a proxy lease."""
     workspace_id: str
     ttl: NotRequired[int]
+    initial_port_ordering: NotRequired[Literal['random', 'port_asc']]
 
 class LeaseAcquireResponse(TypedDict):
     """Response model for successful lease acquisition."""

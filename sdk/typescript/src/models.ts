@@ -97,6 +97,7 @@ export interface HealthStatusListResponse {
 export interface LeaseAcquireRequest {
   workspace_id: string;
   ttl?: number;
+  initial_port_ordering?: 'random' | 'port_asc';
 }
 
 export interface LeaseAcquireResponse {

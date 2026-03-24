@@ -3,6 +3,7 @@ Lease management service.
 Manages proxy lease acquisition, release, and cooldown with workspace isolation.
 """
 import logging
+import random
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)  # Default: only warnings and errors
 
 GLOBAL_WORKSPACE_ID = "__global__"
+INITIAL_PORT_ORDER_RANDOM = "random"
+INITIAL_PORT_ORDER_ASC = "port_asc"
 
 def enable_lease_debug_logging():
     """Enable debug logging for lease operations."""
@@ -202,7 +205,11 @@ class LeaseManager:
         logger.debug(f"Available ports for {workspace_id}: {len(available)}")
         return available
     
-    def _select_lru_port(self, ports: List[int]) -> Optional[int]:
+    def _select_lru_port(
+        self,
+        ports: List[int],
+        initial_port_ordering: str = INITIAL_PORT_ORDER_RANDOM,
+    ) -> Optional[int]:
         """
         Select the least recently used port from the list.
         
@@ -217,9 +224,20 @@ class LeaseManager:
             if usage is None or usage.last_used_at is None:
                 return datetime.min  # Never used = highest priority
             return usage.last_used_at
-        
-        sorted_ports = sorted(ports, key=sort_key)
-        selected = sorted_ports[0]
+
+        usage_by_port = {port: sort_key(port) for port in ports}
+        oldest_usage = min(usage_by_port.values())
+        candidate_ports = [port for port in ports if usage_by_port[port] == oldest_usage]
+
+        if oldest_usage == datetime.min:
+            if initial_port_ordering == INITIAL_PORT_ORDER_ASC:
+                selected = min(candidate_ports)
+            else:
+                selected = random.choice(candidate_ports)
+            logger.debug("Initial ordering selected port: %s (%s)", selected, initial_port_ordering)
+            return selected
+
+        selected = min(candidate_ports)
         logger.debug(f"LRU selected port: {selected}")
         return selected
     
@@ -231,7 +249,12 @@ class LeaseManager:
         self._usage_stats[port].last_used_at = datetime.now()
         self._usage_stats[port].usage_count += 1
     
-    def acquire(self, workspace_id: str, ttl: int = 30) -> LeaseResult:
+    def acquire(
+        self,
+        workspace_id: str,
+        ttl: int = 30,
+        initial_port_ordering: str = INITIAL_PORT_ORDER_RANDOM,
+    ) -> LeaseResult:
         """
         Acquire a proxy lease for the given workspace.
         
@@ -259,7 +282,7 @@ class LeaseManager:
                 )
             
             # 3. Select LRU port
-            port = self._select_lru_port(available_ports)
+            port = self._select_lru_port(available_ports, initial_port_ordering=initial_port_ordering)
             if port is None:
                 return LeaseResult(
                     success=False,

@@ -2,8 +2,16 @@
 Pydantic models for Lease API request/response schemas.
 """
 from datetime import datetime
+from enum import Enum
 from typing import Literal, Optional, List
 from pydantic import BaseModel, Field, ConfigDict
+
+
+class LeaseInitialPortOrdering(str, Enum):
+    """Tie-break strategy when available ports have no prior usage history."""
+
+    RANDOM = "random"
+    PORT_ASC = "port_asc"
 
 
 # ==================== Request Schemas ====================
@@ -14,7 +22,8 @@ class LeaseAcquireRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "workspace_id": "amazon_crawler",
-                "ttl": 60
+                "ttl": 60,
+                "initial_port_ordering": "random",
             }
         }
     )
@@ -29,6 +38,10 @@ class LeaseAcquireRequest(BaseModel):
         ge=5, 
         le=3600, 
         description="Time-to-live in seconds (default: 30s, max: 1h)"
+    )
+    initial_port_ordering: LeaseInitialPortOrdering = Field(
+        default=LeaseInitialPortOrdering.RANDOM,
+        description="Tie-break strategy used only when candidate ports have no prior usage history"
     )
 
 

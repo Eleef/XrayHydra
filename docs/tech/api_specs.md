@@ -16,9 +16,14 @@ Last Updated: 2026-03-22
     ```json
     {
       "workspace_id": "string", // 业务标识
-      "ttl": 60                 // 租约有效期(秒)
+      "ttl": 60,                // 租约有效期(秒)
+      "initial_port_ordering": "random"
     }
     ```
+*   **Optional Field**: `initial_port_ordering`
+    *   `random`: 默认值。仅当候选端口都没有使用历史时，随机挑选一个端口。
+    *   `port_asc`: 仅当候选端口都没有使用历史时，按端口升序挑选。
+*   **Selection Rule**: 一旦端口已有使用历史，仍按 LRU 分配；该字段只影响首次无历史场景下的 tie-break。
 *   **Response (200)**:
     ```json
     {

@@ -132,6 +132,7 @@ class TestPythonSdk(unittest.TestCase):
         self.assertTrue(hasattr(models, "LeaseReleaseResponse"))
         self.assertTrue(hasattr(models, "LeaseStatusResponse"))
         self.assertTrue(hasattr(models, "LeaseStatsResponse"))
+        self.assertIn("initial_port_ordering", models.LeaseAcquireRequest.__annotations__)
 
         acquire_hints = get_type_hints(XrayPrismClient.acquire_lease, globalns=vars(sys.modules[XrayPrismClient.__module__]))
         release_hints = get_type_hints(XrayPrismClient.release_lease, globalns=vars(sys.modules[XrayPrismClient.__module__]))
@@ -151,6 +152,7 @@ class TestPythonSdk(unittest.TestCase):
         self.assertIn("export interface LeaseReleaseResponse", ts_models)
         self.assertIn("export interface LeaseStatusResponse", ts_models)
         self.assertIn("export interface LeaseStatsResponse", ts_models)
+        self.assertIn("initial_port_ordering?: 'random' | 'port_asc';", ts_models)
         self.assertIn("async acquire_lease(payload: models.LeaseAcquireRequest): Promise<models.LeaseAcquireResponse>", ts_client)
         self.assertIn("async release_lease(payload: models.LeaseReleaseRequest): Promise<models.LeaseReleaseResponse>", ts_client)
         self.assertIn("async get_lease_status(query: { workspace_id?: string | unknown } = {}): Promise<models.LeaseStatusResponse>", ts_client)

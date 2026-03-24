@@ -77,6 +77,8 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("example", schemas["LeaseAcquireRequest"])
         self.assertIn("example", schemas["SubscriptionCreate"])
         self.assertIn("example", schemas["ProxyAddRequest"])
+        acquire_request_props = schemas["LeaseAcquireRequest"]["properties"]
+        self.assertIn("initial_port_ordering", acquire_request_props)
 
     def test_proxy_and_lease_schemas_expose_explicit_proxy_urls(self):
         """Client consumers should not need to guess whether a local port is HTTP or SOCKS5."""
