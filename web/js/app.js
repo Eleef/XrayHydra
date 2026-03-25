@@ -824,7 +824,8 @@ class App {
             const result = await api.applyTimedLeaseCooldownBatch(
                 review.scopeId,
                 review.candidates.map((item) => item.proxy_port),
-                review.cooldownSeconds
+                review.cooldownSeconds,
+                'failure'
             );
             await this.refreshLeaseData();
             this.closeModals();
@@ -2457,11 +2458,13 @@ class App {
             return;
         }
 
+        const clearMetrics = confirm(`是否同时清空 workspace ${workspaceId} 的使用/成功/失败统计？\n选择“确定”会一并清空统计；选择“取消”仅复位租约与冷却。`);
+
         try {
-            const result = await api.resetWorkspaceLeaseState(workspaceId);
+            const result = await api.resetWorkspaceLeaseState(workspaceId, clearMetrics);
             await this.refreshLeaseData();
             Components.showToast(
-                `已复位 ${workspaceId}，释放 ${result.released_count} 个租约，召回 ${result.recalled_count} 个冷却`,
+                `已复位 ${workspaceId}，释放 ${result.released_count} 个租约，召回 ${result.recalled_count} 个冷却${clearMetrics ? `，清空 ${result.cleared_metric_entries} 条统计` : ''}`,
                 'success'
             );
         } catch (error) {
@@ -3059,6 +3062,7 @@ class App {
                     <div class="lease-item-info">
                         <span class="lease-item-title">${this.escapeHtml(nodeName)}</span>
                         <span class="lease-item-meta">${this.escapeHtml(metaParts.join(' · '))}</span>
+                        ${this.renderLeaseMetrics(lease.metrics)}
                     </div>
                     <span class="lease-item-timer${isExpiring ? ' expiring' : ''}">${this.formatTime(remainingSeconds)}</span>
                 </div>
@@ -3108,6 +3112,7 @@ class App {
                     <div class="lease-item-info">
                         <span class="lease-item-title">${this.escapeHtml(nodeName)}</span>
                         <span class="lease-item-meta">${this.escapeHtml(metaParts.join(' · '))}</span>
+                        ${this.renderLeaseMetrics(cd.metrics)}
                     </div>
                     <div class="lease-item-actions">
                         <span class="lease-item-timer">${timerLabel}</span>
@@ -3139,6 +3144,19 @@ class App {
             return '所有代理';
         }
         return workspaceId || '所有代理';
+    }
+
+    renderLeaseMetrics(metrics) {
+        const usageCount = Number(metrics?.usage_count ?? 0);
+        const successCount = Number(metrics?.success_count ?? 0);
+        const failureCount = Number(metrics?.failure_count ?? 0);
+        return `
+            <div class="lease-item-metrics">
+                <span class="lease-metric usage">用 ${usageCount}</span>
+                <span class="lease-metric success">成 ${successCount}</span>
+                <span class="lease-metric failure">败 ${failureCount}</span>
+            </div>
+        `;
     }
 
     getTestCooldownScope() {

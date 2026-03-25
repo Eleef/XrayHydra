@@ -14,6 +14,13 @@ class LeaseInitialPortOrdering(str, Enum):
     PORT_ASC = "port_asc"
 
 
+class LeaseExecutionResult(str, Enum):
+    """Optional result marker reported when releasing or freezing a leased proxy."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
 # ==================== Request Schemas ====================
 
 class LeaseAcquireRequest(BaseModel):
@@ -52,7 +59,8 @@ class LeaseReleaseRequest(BaseModel):
             "example": {
                 "workspace_id": "amazon_crawler",
                 "proxy_address": "127.0.0.1:10001",
-                "cooldown_seconds": 300
+                "cooldown_seconds": 300,
+                "result": "success",
             }
         }
     )
@@ -72,6 +80,10 @@ class LeaseReleaseRequest(BaseModel):
         le=86400, 
         description="Cooldown period in seconds (default: 0, max: 24h)"
     )
+    result: Optional[LeaseExecutionResult] = Field(
+        default=None,
+        description="Optional execution result marker used to increment success/failure metrics"
+    )
 
 
 class LeaseCooldownRequest(BaseModel):
@@ -81,6 +93,7 @@ class LeaseCooldownRequest(BaseModel):
             "example": {
                 "workspace_id": "amazon_crawler",
                 "proxy_port": 10001,
+                "result": "failure",
             }
         }
     )
@@ -96,6 +109,10 @@ class LeaseCooldownRequest(BaseModel):
         le=65535,
         description="Local proxy port"
     )
+    result: Optional[LeaseExecutionResult] = Field(
+        default=None,
+        description="Optional execution result marker used to increment success/failure metrics"
+    )
 
 
 class LeaseTimedCooldownBatchRequest(BaseModel):
@@ -106,6 +123,7 @@ class LeaseTimedCooldownBatchRequest(BaseModel):
                 "workspace_id": "amazon_crawler",
                 "proxy_ports": [10001, 10002],
                 "cooldown_seconds": 300,
+                "result": "failure",
             }
         }
     )
@@ -126,6 +144,10 @@ class LeaseTimedCooldownBatchRequest(BaseModel):
         le=86400,
         description="Timed cooldown duration in seconds"
     )
+    result: Optional[LeaseExecutionResult] = Field(
+        default=None,
+        description="Optional execution result marker applied to successfully cooled-down ports"
+    )
 
 
 class WorkspaceResetRequest(BaseModel):
@@ -134,6 +156,7 @@ class WorkspaceResetRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "workspace_id": "amazon_crawler",
+                "clear_metrics": False,
             }
         }
     )
@@ -143,9 +166,35 @@ class WorkspaceResetRequest(BaseModel):
         max_length=100,
         description="Workspace identifier to reset"
     )
+    clear_metrics: bool = Field(
+        default=False,
+        description="Whether to clear persisted usage/success/failure metrics for the workspace"
+    )
 
 
 # ==================== Response Schemas ====================
+
+class LeaseProxyMetrics(BaseModel):
+    """Workspace-scoped usage metrics for one leased proxy port."""
+
+    usage_count: int = Field(..., description="Total acquire count for this workspace and local proxy port")
+    success_count: int = Field(..., description="Reported success count for this workspace and local proxy port")
+    failure_count: int = Field(..., description="Reported failure count for this workspace and local proxy port")
+    last_used_at: Optional[datetime] = Field(
+        default=None,
+        description="Most recent acquire timestamp for this workspace and local proxy port"
+    )
+
+
+class LeaseUsageStatsItem(BaseModel):
+    """Aggregated usage metrics row returned by lease statistics."""
+
+    workspace_id: str
+    port: int
+    usage_count: int
+    success_count: int
+    failure_count: int
+    last_used_at: Optional[datetime] = None
 
 class LeaseAcquireResponse(BaseModel):
     """Response model for successful lease acquisition."""
@@ -160,7 +209,13 @@ class LeaseAcquireResponse(BaseModel):
                 "http_proxy_url": "http://127.0.0.1:10001",
                 "socks5_proxy_url": "socks5://127.0.0.1:10001",
                 "socks5h_proxy_url": "socks5h://127.0.0.1:10001",
-                "expires_at": "2026-03-07T03:10:00"
+                "expires_at": "2026-03-07T03:10:00",
+                "metrics": {
+                    "usage_count": 12,
+                    "success_count": 9,
+                    "failure_count": 3,
+                    "last_used_at": "2026-03-07T03:10:00"
+                }
             }
         }
     )
@@ -173,6 +228,7 @@ class LeaseAcquireResponse(BaseModel):
     socks5_proxy_url: str = Field(..., description="SOCKS5 proxy URL for the leased local port")
     socks5h_proxy_url: str = Field(..., description="SOCKS5H proxy URL for the leased local port (remote DNS)")
     expires_at: datetime = Field(..., description="Lease expiration time")
+    metrics: LeaseProxyMetrics = Field(..., description="Workspace-scoped usage metrics for this port")
 
 
 class LeaseReleaseResponse(BaseModel):
@@ -222,6 +278,7 @@ class WorkspaceResetResponse(BaseModel):
                 "workspace_id": "amazon_crawler",
                 "released_count": 2,
                 "recalled_count": 3,
+                "cleared_metric_entries": 4,
             }
         }
     )
@@ -229,6 +286,7 @@ class WorkspaceResetResponse(BaseModel):
     workspace_id: str
     released_count: int = Field(..., description="Number of active leases removed for the workspace")
     recalled_count: int = Field(..., description="Number of cooldown records removed for the workspace")
+    cleared_metric_entries: int = Field(..., description="Number of persisted metric entries removed for the workspace")
 
 
 class LeaseTimedCooldownBatchResponse(BaseModel):
@@ -283,6 +341,7 @@ class ActiveLeaseInfo(BaseModel):
     socks5h_proxy_url: str
     acquired_at: datetime
     expires_at: datetime
+    metrics: LeaseProxyMetrics
 
 
 class CooldownInfo(BaseModel):
@@ -293,6 +352,7 @@ class CooldownInfo(BaseModel):
     until: Optional[datetime]
     set_at: datetime
     source: Literal["manual", "timed"]
+    metrics: LeaseProxyMetrics
 
 
 class WorkspaceLeaseSummary(BaseModel):
@@ -319,4 +379,4 @@ class LeaseStatsResponse(BaseModel):
     total_active_leases: int
     total_cooldowns: int
     workspaces: List[str]
-    proxies_by_usage: List[dict]  # [{port, last_used_at, usage_count}]
+    proxies_by_usage: List[LeaseUsageStatsItem]

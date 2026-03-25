@@ -19,6 +19,7 @@ class ActiveLeaseInfo(TypedDict):
     socks5h_proxy_url: str
     acquired_at: str
     expires_at: str
+    metrics: LeaseProxyMetrics
 
 class CooldownInfo(TypedDict):
     """Information about a cooldown."""
@@ -28,6 +29,7 @@ class CooldownInfo(TypedDict):
     until: str | None
     set_at: str
     source: Literal['manual', 'timed']
+    metrics: LeaseProxyMetrics
 
 class CustomGroupCopyNodesRequest(TypedDict):
     """Request model for copying existing nodes into a custom group."""
@@ -119,6 +121,7 @@ class LeaseAcquireResponse(TypedDict):
     socks5_proxy_url: str
     socks5h_proxy_url: str
     expires_at: str
+    metrics: LeaseProxyMetrics
 
 class LeaseCooldownActionResponse(TypedDict):
     """Response model for manual cooldown and recall actions."""
@@ -131,14 +134,25 @@ class LeaseCooldownRequest(TypedDict):
     """Request model for manual cooldown/recall operations."""
     workspace_id: str
     proxy_port: int
+    result: NotRequired[LeaseExecutionResult | None]
+
+LeaseExecutionResult = Literal['success', 'failure']
 
 LeaseInitialPortOrdering = Literal['random', 'port_asc']
+
+class LeaseProxyMetrics(TypedDict):
+    """Workspace-scoped usage metrics for one leased proxy port."""
+    usage_count: int
+    success_count: int
+    failure_count: int
+    last_used_at: NotRequired[str | None]
 
 class LeaseReleaseRequest(TypedDict):
     """Request model for releasing a proxy lease."""
     workspace_id: str
     proxy_address: str
     cooldown_seconds: NotRequired[int]
+    result: NotRequired[LeaseExecutionResult | None]
 
 class LeaseReleaseResponse(TypedDict):
     """Response model for lease release."""
@@ -151,7 +165,7 @@ class LeaseStatsResponse(TypedDict):
     total_active_leases: int
     total_cooldowns: int
     workspaces: list[str]
-    proxies_by_usage: list[dict[str, Any]]
+    proxies_by_usage: list[LeaseUsageStatsItem]
 
 class LeaseStatusResponse(TypedDict):
     """Response model for lease status query."""
@@ -167,6 +181,7 @@ class LeaseTimedCooldownBatchRequest(TypedDict):
     workspace_id: str
     proxy_ports: list[int]
     cooldown_seconds: NotRequired[int]
+    result: NotRequired[LeaseExecutionResult | None]
 
 class LeaseTimedCooldownBatchResponse(TypedDict):
     """Response model for applying timed cooldowns to multiple proxy ports."""
@@ -175,6 +190,15 @@ class LeaseTimedCooldownBatchResponse(TypedDict):
     cooldown_seconds: int
     applied_ports: list[int]
     skipped_ports: list[int]
+
+class LeaseUsageStatsItem(TypedDict):
+    """Aggregated usage metrics row returned by lease statistics."""
+    workspace_id: str
+    port: int
+    usage_count: int
+    success_count: int
+    failure_count: int
+    last_used_at: NotRequired[str | None]
 
 class NodeBatchTestResponse(TypedDict):
     """Response model for batch node connectivity tests."""
@@ -396,6 +420,7 @@ class WorkspaceLeaseSummary(TypedDict):
 class WorkspaceResetRequest(TypedDict):
     """Request model for workspace reset operations."""
     workspace_id: str
+    clear_metrics: NotRequired[bool]
 
 class WorkspaceResetResponse(TypedDict):
     """Response model for workspace reset operations."""
@@ -403,5 +428,6 @@ class WorkspaceResetResponse(TypedDict):
     workspace_id: str
     released_count: int
     recalled_count: int
+    cleared_metric_entries: int
 
 XrayStatus = Literal['running', 'stopped', 'starting', 'error']

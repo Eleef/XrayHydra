@@ -14,6 +14,7 @@ export interface ActiveLeaseInfo {
   socks5h_proxy_url: string;
   acquired_at: string;
   expires_at: string;
+  metrics: LeaseProxyMetrics;
 }
 
 export interface CooldownInfo {
@@ -23,6 +24,7 @@ export interface CooldownInfo {
   until: string | unknown;
   set_at: string;
   source: "manual" | "timed";
+  metrics: LeaseProxyMetrics;
 }
 
 export interface CustomGroupCopyNodesRequest {
@@ -114,6 +116,7 @@ export interface LeaseAcquireResponse {
   socks5_proxy_url: string;
   socks5h_proxy_url: string;
   expires_at: string;
+  metrics: LeaseProxyMetrics;
 }
 
 export interface LeaseCooldownActionResponse {
@@ -126,14 +129,25 @@ export interface LeaseCooldownActionResponse {
 export interface LeaseCooldownRequest {
   workspace_id: string;
   proxy_port: number;
+  result?: LeaseExecutionResult | unknown;
 }
 
+export type LeaseExecutionResult = "success" | "failure";
+
 export type LeaseInitialPortOrdering = "random" | "port_asc";
+
+export interface LeaseProxyMetrics {
+  usage_count: number;
+  success_count: number;
+  failure_count: number;
+  last_used_at?: string | unknown;
+}
 
 export interface LeaseReleaseRequest {
   workspace_id: string;
   proxy_address: string;
   cooldown_seconds?: number;
+  result?: LeaseExecutionResult | unknown;
 }
 
 export interface LeaseReleaseResponse {
@@ -146,7 +160,7 @@ export interface LeaseStatsResponse {
   total_active_leases: number;
   total_cooldowns: number;
   workspaces: Array<string>;
-  proxies_by_usage: Array<Record<string, unknown>>;
+  proxies_by_usage: Array<LeaseUsageStatsItem>;
 }
 
 export interface LeaseStatusResponse {
@@ -162,6 +176,7 @@ export interface LeaseTimedCooldownBatchRequest {
   workspace_id: string;
   proxy_ports: Array<number>;
   cooldown_seconds?: number;
+  result?: LeaseExecutionResult | unknown;
 }
 
 export interface LeaseTimedCooldownBatchResponse {
@@ -170,6 +185,15 @@ export interface LeaseTimedCooldownBatchResponse {
   cooldown_seconds: number;
   applied_ports: Array<number>;
   skipped_ports: Array<number>;
+}
+
+export interface LeaseUsageStatsItem {
+  workspace_id: string;
+  port: number;
+  usage_count: number;
+  success_count: number;
+  failure_count: number;
+  last_used_at?: string | unknown;
 }
 
 export interface NodeBatchTestResponse {
@@ -391,6 +415,7 @@ export interface WorkspaceLeaseSummary {
 
 export interface WorkspaceResetRequest {
   workspace_id: string;
+  clear_metrics?: boolean;
 }
 
 export interface WorkspaceResetResponse {
@@ -398,6 +423,7 @@ export interface WorkspaceResetResponse {
   workspace_id: string;
   released_count: number;
   recalled_count: number;
+  cleared_metric_entries: number;
 }
 
 export type XrayStatus = "running" | "stopped" | "starting" | "error";

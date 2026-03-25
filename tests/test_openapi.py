@@ -79,6 +79,14 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("example", schemas["ProxyAddRequest"])
         acquire_request_props = schemas["LeaseAcquireRequest"]["properties"]
         self.assertIn("initial_port_ordering", acquire_request_props)
+        release_request_props = schemas["LeaseReleaseRequest"]["properties"]
+        cooldown_request_props = schemas["LeaseCooldownRequest"]["properties"]
+        batch_cooldown_request_props = schemas["LeaseTimedCooldownBatchRequest"]["properties"]
+        reset_request_props = schemas["WorkspaceResetRequest"]["properties"]
+        self.assertIn("result", release_request_props)
+        self.assertIn("result", cooldown_request_props)
+        self.assertIn("result", batch_cooldown_request_props)
+        self.assertIn("clear_metrics", reset_request_props)
 
     def test_proxy_and_lease_schemas_expose_explicit_proxy_urls(self):
         """Client consumers should not need to guess whether a local port is HTTP or SOCKS5."""
@@ -103,6 +111,7 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("socks5_proxy_url", lease_props)
         self.assertIn("socks5h_proxy_url", lease_props)
         self.assertIn("supported_proxy_protocols", lease_props)
+        self.assertIn("metrics", lease_props)
 
         release_props = schemas["LeaseReleaseResponse"]["properties"]
         self.assertIn("success", release_props)
@@ -115,6 +124,13 @@ class TestOpenAPIContract(unittest.TestCase):
 
         active_lease_props = schemas["ActiveLeaseInfo"]["properties"]
         self.assertIn("node_name", active_lease_props)
+        self.assertIn("metrics", active_lease_props)
+
+        metrics_props = schemas["LeaseProxyMetrics"]["properties"]
+        self.assertIn("usage_count", metrics_props)
+        self.assertIn("success_count", metrics_props)
+        self.assertIn("failure_count", metrics_props)
+        self.assertIn("last_used_at", metrics_props)
 
         proxy_test_all_props = schemas["ProxyTestAllResponse"]["properties"]
         self.assertIn("attempts", proxy_test_all_props)
@@ -140,6 +156,14 @@ class TestOpenAPIContract(unittest.TestCase):
         reset_props = schemas["WorkspaceResetResponse"]["properties"]
         self.assertIn("released_count", reset_props)
         self.assertIn("recalled_count", reset_props)
+        self.assertIn("cleared_metric_entries", reset_props)
+
+        usage_item_ref = schemas["LeaseStatsResponse"]["properties"]["proxies_by_usage"]["items"]["$ref"]
+        usage_item_name = usage_item_ref.rsplit("/", 1)[-1]
+        usage_item_props = schemas[usage_item_name]["properties"]
+        self.assertIn("workspace_id", usage_item_props)
+        self.assertIn("success_count", usage_item_props)
+        self.assertIn("failure_count", usage_item_props)
 
     def test_node_schemas_expose_pool_status_and_test_contract(self):
         """Node responses should expose pool status and node testing contract."""

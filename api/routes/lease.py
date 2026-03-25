@@ -29,6 +29,8 @@ from api.schemas.lease_models import (
     LeaseStatsResponse,
     ActiveLeaseInfo,
     CooldownInfo,
+    LeaseProxyMetrics,
+    LeaseUsageStatsItem,
     WorkspaceLeaseSummary,
 )
 from api.services.lease_service import get_lease_manager
@@ -85,6 +87,16 @@ router = APIRouter(
 )
 
 
+def build_lease_metrics(metrics: Optional[dict]) -> LeaseProxyMetrics:
+    payload = metrics or {}
+    return LeaseProxyMetrics(
+        usage_count=int(payload.get("usage_count", 0) or 0),
+        success_count=int(payload.get("success_count", 0) or 0),
+        failure_count=int(payload.get("failure_count", 0) or 0),
+        last_used_at=payload.get("last_used_at"),
+    )
+
+
 @router.post(
     "/acquire",
     response_model=LeaseAcquireResponse,
@@ -126,6 +138,7 @@ async def acquire_lease(request: LeaseAcquireRequest):
         success=True,
         lease_id=result.lease_id,
         expires_at=result.expires_at,
+        metrics=build_lease_metrics(result.metrics),
         **build_proxy_access_fields(result.proxy_port)
     )
 
@@ -155,7 +168,8 @@ async def release_lease(request: LeaseReleaseRequest):
     success, cooldown_until = manager.release(
         workspace_id=request.workspace_id,
         proxy_address=request.proxy_address,
-        cooldown_seconds=request.cooldown_seconds
+        cooldown_seconds=request.cooldown_seconds,
+        result=request.result.value if request.result else None,
     )
     
     if not success:
@@ -188,6 +202,7 @@ async def set_manual_lease_cooldown(request: LeaseCooldownRequest):
     success, error = manager.set_manual_cooldown(
         workspace_id=request.workspace_id,
         proxy_port=request.proxy_port,
+        result=request.result.value if request.result else None,
     )
 
     if not success:
@@ -249,6 +264,7 @@ async def apply_timed_lease_cooldown_batch(request: LeaseTimedCooldownBatchReque
         workspace_id=request.workspace_id,
         proxy_ports=request.proxy_ports,
         cooldown_seconds=request.cooldown_seconds,
+        result=request.result.value if request.result else None,
     )
     return LeaseTimedCooldownBatchResponse(success=True, **result)
 
@@ -267,7 +283,7 @@ async def apply_timed_lease_cooldown_batch(request: LeaseTimedCooldownBatchReque
 async def reset_workspace_lease_state(request: WorkspaceResetRequest):
     """Reset all lease-related state for a workspace."""
     manager = get_lease_manager()
-    result = manager.reset_workspace(request.workspace_id)
+    result = manager.reset_workspace(request.workspace_id, clear_metrics=request.clear_metrics)
     return WorkspaceResetResponse(success=True, **result)
 
 
@@ -309,6 +325,7 @@ async def get_lease_status(
             node_name=proxy_by_port.get(lease["proxy_port"], {}).get("node_name"),
             acquired_at=lease["acquired_at"],
             expires_at=lease["expires_at"],
+            metrics=build_lease_metrics(lease.get("metrics")),
             **build_proxy_access_fields(lease["proxy_port"])
         )
         for lease in status["active_leases"]
@@ -322,6 +339,7 @@ async def get_lease_status(
             until=cd["until"],
             set_at=cd["set_at"],
             source=cd["source"],
+            metrics=build_lease_metrics(cd.get("metrics")),
         )
         for cd in status["cooldowns"]
     ]
@@ -366,5 +384,15 @@ async def get_lease_stats():
         total_active_leases=stats["total_active_leases"],
         total_cooldowns=stats["total_cooldowns"],
         workspaces=stats["workspaces"],
-        proxies_by_usage=stats["proxies_by_usage"]
+        proxies_by_usage=[
+            LeaseUsageStatsItem(
+                workspace_id=item["workspace_id"],
+                port=item["port"],
+                usage_count=item["usage_count"],
+                success_count=item["success_count"],
+                failure_count=item["failure_count"],
+                last_used_at=item["last_used_at"],
+            )
+            for item in stats["proxies_by_usage"]
+        ]
     )

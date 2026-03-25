@@ -35,9 +35,16 @@ Last Updated: 2026-03-22
       "http_proxy_url": "http://127.0.0.1:10000",
       "socks5_proxy_url": "socks5://127.0.0.1:10000",
       "socks5h_proxy_url": "socks5h://127.0.0.1:10000",
-      "expires_at": "timestamp"
+      "expires_at": "timestamp",
+      "metrics": {
+        "usage_count": 12,
+        "success_count": 9,
+        "failure_count": 3,
+        "last_used_at": "timestamp"
+      }
     }
     ```
+*   **Metric Rule**: `usage_count` 会在成功 acquire 后按 `workspace + proxy_port` 维度自动递增。
 *   **Response (503)**: 无可用健康代理。
 
 > Note: 本地代理端口采用 Xray `socks` inbound，因此单端口同时兼容 HTTP 和 SOCKS5；`proxy_scheme` 当前保留为默认的向后兼容入口，调用方应优先使用显式 URL 字段。
@@ -51,9 +58,11 @@ Last Updated: 2026-03-22
     {
       "workspace_id": "string",
       "proxy_address": "127.0.0.1:10000",
-      "cooldown_seconds": 300   // 冷却时间(秒)
+      "cooldown_seconds": 300,  // 冷却时间(秒)
+      "result": "success"       // 可选: success | failure
     }
     ```
+*   **Metric Rule**: 仅当当前存在活跃租约时，`result` 才会驱动 `success_count` / `failure_count` 递增；旧客户端不传时保持兼容。
 
 ### **Manual Cooldown**
 *   **Endpoint**: `POST /cooldown/manual`
@@ -63,11 +72,13 @@ Last Updated: 2026-03-22
     ```json
     {
       "workspace_id": "string",
-      "proxy_port": 10000
+      "proxy_port": 10000,
+      "result": "failure"
     }
     ```
 *   **Behavior**: `manual` 冷却不自动过期，只能通过召回接口结束。
 *   **Global Scope**: 若 `workspace_id = "__global__"`，表示全局冷却；它会阻止所有 workspace 获取该代理端口。
+*   **Metric Rule**: 若请求成功且提供 `result`，会对对应 `workspace + proxy_port` 累加成功或失败次数。
 
 ### **Recall Cooldown**
 *   **Endpoint**: `POST /cooldown/recall`
@@ -84,11 +95,35 @@ Last Updated: 2026-03-22
     {
       "workspace_id": "string",
       "proxy_ports": [10001, 10002],
-      "cooldown_seconds": 300
+      "cooldown_seconds": 300,
+      "result": "failure"
     }
     ```
 *   **Behavior**: 活跃租约中的端口会被跳过，不会被强制释放。
 *   **Global Scope**: 当前端在“所有代理”视图下，或当前没有激活具体 workspace 时确认测试失败候选清单，会传入 `workspace_id = "__global__"`，表示对全部 workspace 生效的全局定时冷却。
+*   **Metric Rule**: 只有真正成功加入冷却的端口，才会根据 `result` 更新计数。
+
+### **Reset Workspace**
+*   **Endpoint**: `POST /workspace/reset`
+*   **OperationId**: `resetWorkspaceLeaseState`
+*   **Summary**: 清空指定 workspace 的活跃租约与冷却记录，并可选清空统计。
+*   **Request**:
+    ```json
+    {
+      "workspace_id": "string",
+      "clear_metrics": false
+    }
+    ```
+*   **Response Highlights**:
+    ```json
+    {
+      "success": true,
+      "workspace_id": "crawler_a",
+      "released_count": 2,
+      "recalled_count": 1,
+      "cleared_metric_entries": 4
+    }
+    ```
 
 ### **Get Status**
 *   **Endpoint**: `GET /status`
@@ -102,7 +137,12 @@ Last Updated: 2026-03-22
         {
           "workspace_id": "crawler_a",
           "proxy_port": 10022,
-          "expires_at": "timestamp"
+          "expires_at": "timestamp",
+          "metrics": {
+            "usage_count": 12,
+            "success_count": 9,
+            "failure_count": 3
+          }
         }
       ],
       "cooldowns": [
@@ -110,7 +150,12 @@ Last Updated: 2026-03-22
           "workspace_id": "crawler_a",
           "proxy_port": 10022,
           "source": "manual",
-          "until": null
+          "until": null,
+          "metrics": {
+            "usage_count": 12,
+            "success_count": 9,
+            "failure_count": 3
+          }
         }
       ],
       "workspaces": [
@@ -130,6 +175,26 @@ Last Updated: 2026-03-22
 *   **Endpoint**: `GET /stats`
 *   **OperationId**: `getLeaseStats`
 *   **Summary**: 系统统计信息（可用数、活跃租约、Top 使用率）。
+*   **Response Highlights**:
+    ```json
+    {
+      "total_available_proxies": 79,
+      "total_active_leases": 3,
+      "total_cooldowns": 4,
+      "workspaces": ["crawler_a", "crawler_b"],
+      "proxies_by_usage": [
+        {
+          "workspace_id": "crawler_a",
+          "port": 10022,
+          "usage_count": 12,
+          "success_count": 9,
+          "failure_count": 3,
+          "last_used_at": "timestamp"
+        }
+      ]
+    }
+    ```
+*   **Persistence**: 统计以 `workspace + proxy_port` 维度持久化到 `data/lease_metrics.json`，采用 JSON 懒更新写盘策略。
 
 ---
 

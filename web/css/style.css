@@ -2196,6 +2196,31 @@ body {
     font-size: 0.6875rem;
 }
 
+.lease-item-metrics {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.625rem;
+    line-height: 1.2;
+}
+
+.lease-metric {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.lease-metric.usage {
+    color: var(--text-secondary);
+}
+
+.lease-metric.success {
+    color: var(--success);
+}
+
+.lease-metric.failure {
+    color: var(--danger);
+}
+
 .lease-item-timer {
     display: flex;
     align-items: center;

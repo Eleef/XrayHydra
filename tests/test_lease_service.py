@@ -7,13 +7,14 @@ import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from api.services.lease_service import GLOBAL_WORKSPACE_ID, CooldownRecord, LeaseManager, LeaseRecord
+from api.services.lease_service import GLOBAL_WORKSPACE_ID, CooldownRecord, LeaseManager, LeaseRecord, UsageRecord
 
 
 class TestLeaseManager(unittest.TestCase):
@@ -38,6 +39,9 @@ class TestLeaseManager(unittest.TestCase):
         self.assertIsNotNone(result.lease_id)
         self.assertIn(result.proxy_port, self.mock_healthy_ports)
         self.assertIsNotNone(result.expires_at)
+        self.assertEqual(result.metrics["usage_count"], 1)
+        self.assertEqual(result.metrics["success_count"], 0)
+        self.assertEqual(result.metrics["failure_count"], 0)
 
     def test_acquire_no_available_proxy(self):
         with patch.object(self.manager, "_get_healthy_ports", return_value=[]):
@@ -137,6 +141,46 @@ class TestLeaseManager(unittest.TestCase):
         self.assertTrue(success1)
         self.assertTrue(success2)
 
+    def test_release_with_success_result_increments_success_count_once(self):
+        with self._mock_healthy_ports():
+            lease = self.manager.acquire("workspace_a", ttl=60)
+            port = lease.proxy_port
+            success1, _ = self.manager.release(
+                "workspace_a",
+                f"127.0.0.1:{port}",
+                cooldown_seconds=0,
+                result="success",
+            )
+            success2, _ = self.manager.release(
+                "workspace_a",
+                f"127.0.0.1:{port}",
+                cooldown_seconds=0,
+                result="success",
+            )
+
+        self.assertTrue(success1)
+        self.assertTrue(success2)
+        metrics = self.manager._usage_stats["workspace_a"][port]
+        self.assertEqual(metrics.usage_count, 1)
+        self.assertEqual(metrics.success_count, 1)
+        self.assertEqual(metrics.failure_count, 0)
+
+    def test_release_without_result_does_not_increment_outcome_counts(self):
+        with self._mock_healthy_ports():
+            lease = self.manager.acquire("workspace_a", ttl=60)
+            port = lease.proxy_port
+            success, _ = self.manager.release(
+                "workspace_a",
+                f"127.0.0.1:{port}",
+                cooldown_seconds=0,
+            )
+
+        self.assertTrue(success)
+        metrics = self.manager._usage_stats["workspace_a"][port]
+        self.assertEqual(metrics.usage_count, 1)
+        self.assertEqual(metrics.success_count, 0)
+        self.assertEqual(metrics.failure_count, 0)
+
     def test_cooldown_blocks_same_workspace_only(self):
         with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
             result_a = self.manager.acquire("workspace_a", ttl=60)
@@ -177,6 +221,17 @@ class TestLeaseManager(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.proxy_port, 10001)
 
+    def test_manual_cooldown_with_failure_result_increments_failure_count(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
+            success, error = self.manager.set_manual_cooldown("workspace_a", 10001, result="failure")
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        metrics = self.manager._usage_stats["workspace_a"][10001]
+        self.assertEqual(metrics.usage_count, 0)
+        self.assertEqual(metrics.success_count, 0)
+        self.assertEqual(metrics.failure_count, 1)
+
     def test_manual_cooldown_does_not_expire_automatically(self):
         key = "workspace_a:10001"
         self.manager._cooldowns[key] = CooldownRecord(
@@ -207,6 +262,16 @@ class TestLeaseManager(unittest.TestCase):
         self.assertEqual(result["applied_ports"], [10002])
         self.assertEqual(result["skipped_ports"], [10001])
         self.assertEqual(self.manager._cooldowns["workspace_a:10002"].source, "timed")
+
+    def test_timed_cooldown_batch_with_failure_result_counts_only_applied_ports(self):
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]):
+            self.manager.acquire("workspace_a", ttl=60, initial_port_ordering="port_asc")
+            result = self.manager.set_timed_cooldowns("workspace_a", [10001, 10002], 300, result="failure")
+
+        self.assertEqual(result["applied_ports"], [10002])
+        self.assertEqual(result["skipped_ports"], [10001])
+        self.assertEqual(self.manager._usage_stats["workspace_a"][10001].failure_count, 0)
+        self.assertEqual(self.manager._usage_stats["workspace_a"][10002].failure_count, 1)
 
     def test_global_timed_cooldown_blocks_acquire_for_all_workspaces(self):
         with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
@@ -244,9 +309,11 @@ class TestLeaseManager(unittest.TestCase):
     def test_lru_selection(self):
         manager = LeaseManager()
         now = datetime.now()
-        manager._usage_stats[10001] = MagicMock(last_used_at=now - timedelta(hours=2))
-        manager._usage_stats[10002] = MagicMock(last_used_at=now - timedelta(hours=1))
-        manager._usage_stats[10003] = MagicMock(last_used_at=now)
+        manager._usage_stats["workspace_x"] = {
+            10001: UsageRecord(last_used_at=now - timedelta(hours=2), usage_count=2),
+            10002: UsageRecord(last_used_at=now - timedelta(hours=1), usage_count=1),
+            10003: UsageRecord(last_used_at=now, usage_count=1),
+        }
 
         with patch.object(manager, "_get_healthy_ports", return_value=[10001, 10002, 10003]):
             result = manager.acquire("workspace_x", ttl=60)
@@ -302,6 +369,8 @@ class TestLeaseManager(unittest.TestCase):
         summaries = {item["workspace_id"]: item for item in status["workspaces"]}
         self.assertEqual(summaries["workspace_a"]["cooldown_count"], 1)
         self.assertEqual(summaries["workspace_b"]["cooldown_count"], 1)
+        self.assertIn("metrics", status["cooldowns"][0])
+        self.assertIn("usage_count", status["cooldowns"][0]["metrics"])
 
     def test_get_status_filtered_workspace_keeps_workspace_summary_list(self):
         with self._mock_healthy_ports():
@@ -343,15 +412,47 @@ class TestLeaseManager(unittest.TestCase):
         self.assertEqual(status["total_active"], 0)
         self.assertEqual(status["total_cooldowns"], 1)
 
+    def test_reset_workspace_optionally_clears_only_target_metrics(self):
+        with self._mock_healthy_ports():
+            lease_a = self.manager.acquire("workspace_a", ttl=60)
+            self.manager.release("workspace_a", f"127.0.0.1:{lease_a.proxy_port}", result="success")
+            lease_b = self.manager.acquire("workspace_b", ttl=60)
+            self.manager.release("workspace_b", f"127.0.0.1:{lease_b.proxy_port}", result="failure")
+
+        result = self.manager.reset_workspace("workspace_a", clear_metrics=True)
+
+        self.assertEqual(result["cleared_metric_entries"], 1)
+        self.assertNotIn("workspace_a", self.manager._usage_stats)
+        self.assertIn("workspace_b", self.manager._usage_stats)
+
     def test_get_stats(self):
         with self._mock_healthy_ports():
-            self.manager.acquire("workspace_a", ttl=60)
+            lease_a = self.manager.acquire("workspace_a", ttl=60)
+            self.manager.release("workspace_a", f"127.0.0.1:{lease_a.proxy_port}", result="success")
             self.manager.acquire("workspace_b", ttl=60)
 
         stats = self.manager.get_stats()
-        self.assertEqual(stats["total_active_leases"], 2)
+        self.assertEqual(stats["total_active_leases"], 1)
         self.assertIn("workspace_a", stats["workspaces"])
         self.assertIn("workspace_b", stats["workspaces"])
+        self.assertTrue(all("success_count" in item for item in stats["proxies_by_usage"]))
+        self.assertTrue(any(item["workspace_id"] == "workspace_a" for item in stats["proxies_by_usage"]))
+
+    def test_metrics_persist_round_trip_with_lazy_flush_store(self):
+        with TemporaryDirectory() as tmp_dir:
+            metrics_path = Path(tmp_dir) / "lease_metrics.json"
+            manager = LeaseManager(metrics_path=metrics_path, flush_delay_seconds=5, max_flush_interval_seconds=5)
+            with patch.object(manager, "_get_healthy_ports", return_value=[10001]):
+                lease = manager.acquire("workspace_a", ttl=60)
+                manager.release("workspace_a", f"127.0.0.1:{lease.proxy_port}", result="success")
+                manager.set_manual_cooldown("workspace_b", 10001, result="failure")
+
+            manager.flush_metrics()
+            restored = LeaseManager(metrics_path=metrics_path, flush_delay_seconds=5, max_flush_interval_seconds=5)
+
+        self.assertEqual(restored._usage_stats["workspace_a"][10001].usage_count, 1)
+        self.assertEqual(restored._usage_stats["workspace_a"][10001].success_count, 1)
+        self.assertEqual(restored._usage_stats["workspace_b"][10001].failure_count, 1)
 
 
 class TestLeaseRecord(unittest.TestCase):

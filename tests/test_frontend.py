@@ -24,6 +24,7 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn("测试选中", body)
         self.assertIn("测试全部", body)
         self.assertIn('id="btn-dedupe-exit-ip"', body)
+        self.assertIn('id="btn-reset-workspace"', body)
         self.assertIn("节点组", body)
 
     def test_favicon_request_does_not_404(self):
@@ -74,3 +75,14 @@ class TestFrontendEntrypoints(unittest.TestCase):
         self.assertIn("failed_count", spec_text)
         self.assertIn("success_count", spec_text)
         self.assertIn("current_target_completed", spec_text)
+        self.assertIn("复位 workspace", spec_text)
+        self.assertIn("用 N", spec_text)
+        self.assertIn("成 N", spec_text)
+        self.assertIn("败 N", spec_text)
+
+    def test_docs_describe_lease_metrics_and_reset_behavior(self):
+        with open("docs/guide/development.md", encoding="utf-8") as guide:
+            guide_text = guide.read()
+        self.assertIn("workspace + proxy_port", guide_text)
+        self.assertIn("data/lease_metrics.json", guide_text)
+        self.assertIn("复位 workspace", guide_text)

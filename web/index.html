@@ -184,7 +184,12 @@
                             <p class="workspace-bar-label">当前范围</p>
                             <h3 class="workspace-bar-title" id="current-workspace-name">未选择</h3>
                         </div>
-                        <span class="workspace-bar-hint" id="workspace-bar-hint">可切换具体 workspace，或查看所有代理</span>
+                        <div class="workspace-bar-actions">
+                            <span class="workspace-bar-hint" id="workspace-bar-hint">可切换具体 workspace，或查看所有代理</span>
+                            <button class="btn btn-secondary btn-sm" id="btn-reset-workspace" disabled>
+                                复位 workspace
+                            </button>
+                        </div>
                     </div>
                     <div class="workspace-chip-list" id="workspace-chip-list">
                         <div class="workspace-empty" id="workspace-empty-state">暂无可选 workspace</div>

@@ -88,6 +88,7 @@
 *   默认恢复浏览器上次选择的 workspace；如果记录不存在，则回退到 `所有代理`。
 *   即使没有任何 workspace 被激活，`所有代理` 视图下也允许执行“测试全部”和全局冷却。
 *   `所有代理` 视图下禁用“复位 workspace”这类仅适用于具体 workspace 的动作。
+*   具体 workspace 视图下提供 `复位 workspace` 按钮；执行时先确认是否清空活跃租约与冷却，再额外确认是否一并清空该 workspace 的租约统计。
 
 ### **3.2 Global Dashboard (统计看板)**
 *   **Metrics**:
@@ -101,6 +102,9 @@
 *   **Scope**:
     *   具体 workspace 视图：仅显示该 workspace 的活跃租约。
     *   `所有代理` 视图：显示全部活跃租约，并额外标出所属 workspace。
+*   **Lease Metrics**:
+    *   每条活跃租约在副信息区显示三项小号统计：`用 N`、`成 N`、`败 N`。
+    *   三项统计按 `workspace + proxy_port` 维度记录，其中“用”为中性色，“成”为绿色，“败”为红色。
 *   **Out of Scope**: 本阶段不提供强制释放活跃租约。
 
 ### **3.4 Cooldown Pool (冷却池)**
@@ -112,6 +116,7 @@
     *   `manual`: 不自动过期，只能通过手动召回结束。
     *   `timed`: 保留原有倒计时冷却语义，可等待到期，也可手动召回提前结束。
 *   冷却池列表中的每一条记录都提供“召回”入口。
+*   冷却池条目同样展示 `用 / 成 / 败` 三项统计，便于在召回前判断该代理在当前 workspace 下的使用表现。
 
 ### **3.5 Proxy List Manual Management (代理栏手动管理)**
 *   在 `Proxies` Tab 中，所有代理都基于“当前 workspace”展示状态：

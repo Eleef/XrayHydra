@@ -485,10 +485,14 @@ class ApiClient {
      * @param {number} proxyPort - Proxy port
      * @returns {Promise<{success: boolean, workspace_id: string, proxy_port: number, source: string|null}>}
      */
-    async setManualLeaseCooldown(workspaceId, proxyPort) {
+    async setManualLeaseCooldown(workspaceId, proxyPort, result = null) {
         return this.request('/lease/cooldown/manual', {
             method: 'POST',
-            body: JSON.stringify({ workspace_id: workspaceId, proxy_port: proxyPort }),
+            body: JSON.stringify({
+                workspace_id: workspaceId,
+                proxy_port: proxyPort,
+                result,
+            }),
         });
     }
 
@@ -512,13 +516,14 @@ class ApiClient {
      * @param {number} cooldownSeconds - Timed cooldown duration in seconds
      * @returns {Promise<{success: boolean, workspace_id: string, cooldown_seconds: number, applied_ports: number[], skipped_ports: number[]}>}
      */
-    async applyTimedLeaseCooldownBatch(workspaceId, proxyPorts, cooldownSeconds = 300) {
+    async applyTimedLeaseCooldownBatch(workspaceId, proxyPorts, cooldownSeconds = 300, result = null) {
         return this.request('/lease/cooldown/timed/batch', {
             method: 'POST',
             body: JSON.stringify({
                 workspace_id: workspaceId,
                 proxy_ports: proxyPorts,
                 cooldown_seconds: cooldownSeconds,
+                result,
             }),
         });
     }
@@ -528,10 +533,13 @@ class ApiClient {
      * @param {string} workspaceId - Workspace identifier
      * @returns {Promise<{success: boolean, workspace_id: string, released_count: number, recalled_count: number}>}
      */
-    async resetWorkspaceLeaseState(workspaceId) {
+    async resetWorkspaceLeaseState(workspaceId, clearMetrics = false) {
         return this.request('/lease/workspace/reset', {
             method: 'POST',
-            body: JSON.stringify({ workspace_id: workspaceId }),
+            body: JSON.stringify({
+                workspace_id: workspaceId,
+                clear_metrics: clearMetrics,
+            }),
         });
     }
 
@@ -555,13 +563,14 @@ class ApiClient {
      * @param {number} cooldownSeconds - Cooldown period in seconds
      * @returns {Promise<{success: boolean, cooldown_until: string|null}>}
      */
-    async releaseLease(workspaceId, proxyAddress, cooldownSeconds = 300) {
+    async releaseLease(workspaceId, proxyAddress, cooldownSeconds = 300, result = null) {
         return this.request('/lease/release', {
             method: 'POST',
             body: JSON.stringify({
                 workspace_id: workspaceId,
                 proxy_address: proxyAddress,
-                cooldown_seconds: cooldownSeconds
+                cooldown_seconds: cooldownSeconds,
+                result,
             }),
         });
     }
