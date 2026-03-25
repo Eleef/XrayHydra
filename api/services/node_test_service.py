@@ -217,6 +217,9 @@ class NodeTestService:
             ss_plugin_opts=node.get("ss_plugin_opts"),
             ss_uot=node.get("ss_uot"),
             ss_uot_version=node.get("ss_uot_version"),
+            raw_network=node.get("raw_network"),
+            parse_degraded=bool(node.get("parse_degraded", False)),
+            parse_degraded_reason=node.get("parse_degraded_reason"),
         )
         capability = evaluate_node_runtime(proxy_node)
         if not capability.runtime_supported:

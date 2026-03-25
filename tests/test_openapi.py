@@ -104,6 +104,8 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("supported_proxy_protocols", proxy_props)
         self.assertIn("pool_status", proxy_props)
         self.assertIn("disabled_reason", proxy_props)
+        self.assertIn("runtime_loaded", proxy_props)
+        self.assertIn("runtime_load_reason", proxy_props)
 
         lease_props = schemas["LeaseAcquireResponse"]["properties"]
         self.assertIn("proxy_scheme", lease_props)
@@ -164,6 +166,10 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("workspace_id", usage_item_props)
         self.assertIn("success_count", usage_item_props)
         self.assertIn("failure_count", usage_item_props)
+
+        health_props = schemas["ProxyHealthResponse"]["properties"]
+        self.assertIn("last_error_category", health_props)
+        self.assertIn("last_error_message", health_props)
 
     def test_node_schemas_expose_pool_status_and_test_contract(self):
         """Node responses should expose pool status and node testing contract."""

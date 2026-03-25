@@ -183,6 +183,10 @@ const Components = {
             canTest: true,
             canCooldown: false,
             canRecall: false,
+            copyTitle: '复制代理地址',
+            testTitle: '测试',
+            cooldownTitle: '手动冷却',
+            recallTitle: '召回冷却',
         };
 
         div.innerHTML = `
@@ -198,6 +202,10 @@ const Components = {
                         ${proxy.latency_ms ? `<span class="proxy-latency ${latencyClass}">${latencyText}</span>` : ''}
                     </div>
                     <span class="proxy-workspace-note">${this.escapeHtml(state.note || '')}</span>
+                    ${this.renderProxyLeaseMetrics(state.metrics, {
+                        workspaceLabel: state.metricsWorkspaceLabel,
+                        showWorkspaceLabel: Boolean(state.showMetricsWorkspaceLabel),
+                    })}
                 </div>
             </div>
             <div class="proxy-item-side">
@@ -206,24 +214,24 @@ const Components = {
                     ${state.sourceLabel ? `<span class="proxy-state-source">${this.escapeHtml(state.sourceLabel)}</span>` : ''}
                 </span>
                 <div class="proxy-actions">
-                    <button class="btn btn-icon btn-sm" data-action="copy" title="复制代理地址" ${state.canCopy === false ? 'disabled' : ''}>
+                    <button class="btn btn-icon btn-sm" data-action="copy" title="${this.escapeHtml(state.copyTitle || '复制代理地址')}" ${state.canCopy === false ? 'disabled' : ''}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>
                     </button>
-                    <button class="btn btn-icon btn-sm" data-action="test" title="测试" ${state.canTest === false ? 'disabled' : ''}>
+                    <button class="btn btn-icon btn-sm" data-action="test" title="${this.escapeHtml(state.testTitle || '测试')}" ${state.canTest === false ? 'disabled' : ''}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                             <polyline points="22 4 12 14.01 9 11.01"></polyline>
                         </svg>
                     </button>
-                    <button class="btn btn-icon btn-sm" data-action="cooldown" title="手动冷却" ${state.canCooldown ? '' : 'disabled'}>
+                    <button class="btn btn-icon btn-sm" data-action="cooldown" title="${this.escapeHtml(state.cooldownTitle || '手动冷却')}" ${state.canCooldown ? '' : 'disabled'}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
                         </svg>
                     </button>
-                    <button class="btn btn-icon btn-sm" data-action="recall" title="召回冷却" ${state.canRecall ? '' : 'disabled'}>
+                    <button class="btn btn-icon btn-sm" data-action="recall" title="${this.escapeHtml(state.recallTitle || '召回冷却')}" ${state.canRecall ? '' : 'disabled'}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
                             <polyline points="21 3 21 9 15 9"></polyline>
@@ -240,6 +248,23 @@ const Components = {
         `;
 
         return div;
+    },
+
+    renderProxyLeaseMetrics(metrics, options = {}) {
+        if (!metrics) return '';
+        const usageCount = Number(metrics?.usage_count ?? 0);
+        const successCount = Number(metrics?.success_count ?? 0);
+        const failureCount = Number(metrics?.failure_count ?? 0);
+        const workspaceLabel = options.workspaceLabel ? this.escapeHtml(options.workspaceLabel) : '';
+
+        return `
+            <div class="proxy-lease-metrics">
+                ${options.showWorkspaceLabel && workspaceLabel ? `<span class="proxy-metric-scope">${workspaceLabel}</span>` : ''}
+                <span class="lease-metric usage">用 ${usageCount}</span>
+                <span class="lease-metric success">成 ${successCount}</span>
+                <span class="lease-metric failure">败 ${failureCount}</span>
+            </div>
+        `;
     },
 
     /**

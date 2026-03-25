@@ -29,6 +29,8 @@ async def get_proxies():
     service = get_proxy_service()
     proxies = service.get_all_proxies()
     xray_status = service.get_xray_status()
+    xray_running = xray_status == "running"
+    runtime_ports = set(service.get_runtime_proxy_ports()) if xray_running else set()
     
     return ProxyListResponse(
         proxies=[ProxyResponse(**{
@@ -44,6 +46,7 @@ async def get_proxies():
             "exit_ip": p.get("exit_ip"),
             "pool_status": p.get("pool_status", "active"),
             "disabled_reason": p.get("disabled_reason"),
+            **service.get_proxy_runtime_metadata(p, runtime_ports=runtime_ports, xray_running=xray_running),
         }) for p in proxies],
         total=len(proxies),
         xray_status=xray_status
@@ -69,6 +72,8 @@ async def add_proxies(data: ProxyAddRequest):
                 detail="No new proxies added (nodes may already be in proxy list)"
             )
         
+        xray_running = service.get_xray_status() == "running"
+        runtime_ports = set(service.get_runtime_proxy_ports()) if xray_running else set()
         return [ProxyResponse(**{
             **service.build_proxy_access_fields(p["port"]),
             "port": p["port"],
@@ -80,6 +85,7 @@ async def add_proxies(data: ProxyAddRequest):
             "test_status": p.get("test_status", "pending"),
             "pool_status": p.get("pool_status", "active"),
             "disabled_reason": p.get("disabled_reason"),
+            **service.get_proxy_runtime_metadata(p, runtime_ports=runtime_ports, xray_running=xray_running),
         }) for p in new_proxies]
     except ValueError as e:
         raise HTTPException(

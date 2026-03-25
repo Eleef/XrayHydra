@@ -102,6 +102,11 @@ class ProxyNode:
     ss_uot: Optional[bool] = None
     ss_uot_version: Optional[int] = None
 
+    # 解析诊断
+    raw_network: Optional[str] = None
+    parse_degraded: bool = False
+    parse_degraded_reason: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """
         转换为字典格式，便于 JSON 序列化
@@ -202,6 +207,8 @@ class ProxyHealthState:
     last_check: Optional[datetime] = None     # 最后检测时间
     last_success: Optional[datetime] = None   # 最后成功时间
     last_latency_ms: Optional[float] = None   # 最后成功延迟
+    last_error_category: Optional[str] = None
+    last_error_message: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
@@ -219,6 +226,10 @@ class ProxyHealthState:
             result["last_success"] = self.last_success.isoformat()
         if self.last_latency_ms is not None:
             result["last_latency_ms"] = self.last_latency_ms
+        if self.last_error_category:
+            result["last_error_category"] = self.last_error_category
+        if self.last_error_message:
+            result["last_error_message"] = self.last_error_message
         return result
     
     @classmethod
@@ -244,4 +255,6 @@ class ProxyHealthState:
             last_check=last_check,
             last_success=last_success,
             last_latency_ms=data.get("last_latency_ms"),
+            last_error_category=data.get("last_error_category"),
+            last_error_message=data.get("last_error_message"),
         )

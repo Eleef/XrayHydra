@@ -17,6 +17,7 @@ import requests
 from .models import ProxyHealthState, HealthStatus
 
 logger = logging.getLogger(__name__)
+FAILURE_THRESHOLD = 3
 
 
 # 默认配置
@@ -108,7 +109,7 @@ class HealthMonitor:
         self,
         port: int,
         proxy_type: str = "http"
-    ) -> Tuple[bool, Optional[float], Optional[str]]:
+    ) -> Tuple[bool, Optional[float], Optional[str], Optional[str]]:
         """
         探测单个代理的连通性
         
@@ -117,9 +118,12 @@ class HealthMonitor:
             proxy_type: 代理类型 (http/socks5)
             
         Returns:
-            Tuple[bool, Optional[float], Optional[str]]:
-                (是否成功, 延迟ms, 错误信息)
+            Tuple[bool, Optional[float], Optional[str], Optional[str]]:
+                (是否成功, 延迟ms, 错误信息, 错误分类)
         """
+        if not self._is_local_proxy_available(port):
+            return False, None, "本地代理端口未监听", "runtime_unavailable"
+
         proxy_url = f"{proxy_type}://{self.listen_address}:{port}"
         proxies = {
             "http": proxy_url,
@@ -139,18 +143,30 @@ class HealthMonitor:
             # 只要能建立连接就算成功（HTTP 状态码 < 500）
             if response.status_code < 500:
                 latency_ms = (time.time() - start_time) * 1000
-                return True, round(latency_ms, 2), None
+                return True, round(latency_ms, 2), None, None
             else:
-                return False, None, f"HTTP {response.status_code}"
+                return False, None, f"HTTP {response.status_code}", "probe_failed"
                 
         except requests.exceptions.Timeout:
-            return False, None, "请求超时"
-        except requests.exceptions.ProxyError as e:
-            return False, None, f"代理错误"
+            return False, None, "请求超时", "probe_failed"
+        except requests.exceptions.ProxyError:
+            return False, None, "代理错误", "runtime_unavailable"
         except requests.exceptions.ConnectionError as e:
-            return False, None, f"连接错误"
+            error_text = str(e).lower()
+            if any(keyword in error_text for keyword in ("refused", "proxy", "failed to establish a new connection", "actively refused")):
+                return False, None, "连接错误", "runtime_unavailable"
+            return False, None, "连接错误", "probe_failed"
         except Exception as e:
-            return False, None, f"未知错误: {str(e)[:30]}"
+            return False, None, f"未知错误: {str(e)[:30]}", "probe_failed"
+
+    def _is_local_proxy_available(self, port: int) -> bool:
+        """Check whether the local proxy port is actually listening."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            try:
+                return sock.connect_ex((self.listen_address, port)) == 0
+            except OSError:
+                return False
     
     def get_or_create_state(self, port: int) -> ProxyHealthState:
         """获取或创建代理的健康状态"""
@@ -191,6 +207,8 @@ class HealthMonitor:
         state.last_success = now
         state.last_latency_ms = latency_ms
         state.failure_count = 0
+        state.last_error_category = None
+        state.last_error_message = None
         
         # 如果之前是禁用状态，恢复为降级状态（需要观察）
         if state.status == HealthStatus.DISABLED:
@@ -206,7 +224,7 @@ class HealthMonitor:
         
         logger.debug(f"代理 :{port} 探测成功 ({latency_ms:.0f}ms)")
     
-    def handle_probe_failure(self, port: int, error: str) -> None:
+    def handle_probe_failure(self, port: int, error: str, error_category: str = "probe_failed") -> None:
         """
         处理探测失败
         
@@ -221,9 +239,11 @@ class HealthMonitor:
         
         state.last_check = now
         state.failure_count += 1
-        
-        # 连续失败达到阈值（这里设为1次即触发）
-        if state.failure_count >= 1 and state.status != HealthStatus.DISABLED:
+        state.last_error_category = error_category
+        state.last_error_message = error
+
+        # 连续失败达到阈值后才触发罚时禁用
+        if state.failure_count >= FAILURE_THRESHOLD and state.status != HealthStatus.DISABLED:
             # 提升罚时等级
             state.penalty_level = min(
                 state.penalty_level + 1,
@@ -239,10 +259,16 @@ class HealthMonitor:
             
             logger.warning(
                 f"代理 :{port} 进入禁用状态 "
-                f"(等级 {state.penalty_level}, 罚时 {penalty_seconds // 60} 分钟)"
+                f"(等级 {state.penalty_level}, 罚时 {penalty_seconds // 60} 分钟, 原因 {error_category}: {error})"
             )
         else:
-            logger.debug(f"代理 :{port} 探测失败: {error}")
+            logger.debug(
+                "代理 :%s 探测失败 (%s/%s): %s",
+                port,
+                state.failure_count,
+                FAILURE_THRESHOLD,
+                error,
+            )
     
     def check_penalty_expiry(self) -> None:
         """
@@ -314,15 +340,20 @@ class HealthMonitor:
             for future in as_completed(future_to_port):
                 port = future_to_port[future]
                 try:
-                    success, latency_ms, error = future.result()
+                    result = future.result()
+                    if len(result) == 4:
+                        success, latency_ms, error, error_category = result
+                    else:
+                        success, latency_ms, error = result
+                        error_category = "probe_failed"
                     
                     if success:
                         self.handle_probe_success(port, latency_ms)
                     else:
-                        self.handle_probe_failure(port, error)
+                        self.handle_probe_failure(port, error, error_category)
                         
                 except Exception as e:
-                    self.handle_probe_failure(port, str(e))
+                    self.handle_probe_failure(port, str(e), "probe_failed")
                 
                 completed += 1
                 if progress_callback:

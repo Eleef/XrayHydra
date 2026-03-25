@@ -4,7 +4,9 @@ Subscription input compatibility tests (URI/Base64/Clash/SIP008).
 
 import base64
 import unittest
+from unittest.mock import patch
 
+from src.xray_prism.capabilities import evaluate_node_runtime
 from src.xray_prism.models import Protocol
 from src.xray_prism.parser import parse_shadowsocks, parse_subscription
 
@@ -123,6 +125,38 @@ class TestSubscriptionParserInputs(unittest.TestCase):
         self.assertEqual(node.name, "NamedByQuery")
         self.assertEqual(node.ss_plugin, "v2ray-plugin")
         self.assertEqual(node.ss_plugin_opts, "mode=websocket")
+
+    def test_clash_regex_fallback_keeps_node_visible_but_runtime_unsupported(self):
+        # Force fallback parser path by disabling yaml loader in parser module.
+        content = (
+            "- { name: 'Fallback-Trojan', type: trojan, "
+            "server: demo.example.com, port: 443, password: secret }"
+        )
+
+        with patch("src.xray_prism.parser.yaml", None):
+            nodes = parse_subscription(content)
+
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].protocol, Protocol.TROJAN)
+        capability = evaluate_node_runtime(nodes[0])
+        self.assertFalse(capability.runtime_supported)
+
+    def test_unknown_network_in_clash_node_is_not_runtime_supported(self):
+        content = (
+            "proxies:\n"
+            "  - name: VLESS-Unknown-Network\n"
+            "    type: vless\n"
+            "    server: vl.example.com\n"
+            "    port: 443\n"
+            "    uuid: 11111111-1111-1111-1111-111111111111\n"
+            "    tls: true\n"
+            "    network: quicx\n"
+        )
+        nodes = parse_subscription(content)
+        self.assertEqual(len(nodes), 1)
+        capability = evaluate_node_runtime(nodes[0])
+        self.assertFalse(capability.runtime_supported)
+        self.assertIn("network", (capability.reason or "").lower())
 
 
 if __name__ == "__main__":

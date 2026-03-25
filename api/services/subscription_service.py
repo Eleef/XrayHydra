@@ -66,6 +66,9 @@ class SubscriptionService:
         normalized = dict(node_data)
         normalized.setdefault("group_type", "subscription")
         normalized["test_status"] = str(normalized.get("test_status") or "pending")
+        normalized.setdefault("raw_network", None)
+        normalized.setdefault("parse_degraded", False)
+        normalized.setdefault("parse_degraded_reason", None)
         return normalized
     
     def get_all_subscriptions(self) -> List[Dict]:
@@ -207,6 +210,9 @@ class SubscriptionService:
                 "ss_plugin_opts": node.ss_plugin_opts,
                 "ss_uot": node.ss_uot,
                 "ss_uot_version": node.ss_uot_version,
+                "raw_network": node.raw_network,
+                "parse_degraded": node.parse_degraded,
+                "parse_degraded_reason": node.parse_degraded_reason,
                 "test_status": "pending",
                 "latency_ms": None,
                 "exit_ip": None,

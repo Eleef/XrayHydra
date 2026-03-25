@@ -18,7 +18,7 @@ except ImportError:
 from .models import ProxyNode, Protocol, NetworkType
 from .protocol_parsers.base import (
     ParseError,
-    parse_network_type,
+    resolve_network_type,
 )
 from .protocol_parsers.hysteria2 import parse_hysteria2 as _parse_hysteria2_impl
 from .protocol_parsers.registry import create_default_registry
@@ -342,6 +342,8 @@ def _parse_clash_regex(content: str) -> List[ProxyNode]:
                 tls=True,  # Clash Trojan/Hysteria2 默认启用 TLS
                 sni=sni,
                 allow_insecure=skip_cert_verify,
+                parse_degraded=True,
+                parse_degraded_reason="Clash 回退解析未提取完整字段，仅展示不可运行",
             )
             
             nodes.append(node)
@@ -411,7 +413,8 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
 
         # 网络类型
         network_str = proxy.get('network', 'tcp')
-        network = parse_network_type(network_str)
+        parsed_network = resolve_network_type(network_str)
+        network = parsed_network.network
         if protocol == Protocol.HYSTERIA2:
             network = NetworkType.HYSTERIA
         
@@ -509,6 +512,13 @@ def _parse_clash_proxy(proxy: Dict[str, Any]) -> Optional[ProxyNode]:
             ss_plugin_opts=ss_plugin_opts,
             ss_uot=ss_uot if isinstance(ss_uot, bool) else (bool(ss_uot) if ss_uot is not None else None),
             ss_uot_version=int(ss_uot_version) if ss_uot_version not in (None, "") else None,
+            raw_network=parsed_network.unsupported_raw_value,
+            parse_degraded=parsed_network.unsupported_raw_value is not None,
+            parse_degraded_reason=(
+                f"当前节点使用了未支持的 network 传输类型: {parsed_network.unsupported_raw_value}"
+                if parsed_network.unsupported_raw_value
+                else None
+            ),
         )
         
     except Exception as e:

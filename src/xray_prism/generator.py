@@ -15,9 +15,8 @@ from .models import (
     Protocol,
     NetworkType,
     PortMapping,
-    get_runtime_support_reason,
-    is_runtime_supported_protocol,
 )
+from .capabilities import evaluate_node_runtime
 from .runtime_adapters.xray import XrayAdapterRegistry
 
 logger = logging.getLogger(__name__)
@@ -221,8 +220,9 @@ class ConfigGenerator:
     
     def _node_to_outbound(self, node: ProxyNode, tag: str) -> Dict[str, Any]:
         """将 ProxyNode 转换为 Xray 出站配置"""
-        if not is_runtime_supported_protocol(node.protocol):
-            reason = get_runtime_support_reason(node.protocol) or f"不支持的协议: {node.protocol.value}"
+        capability = evaluate_node_runtime(node)
+        if not capability.runtime_supported:
+            reason = capability.reason or f"不支持的协议: {node.protocol.value}"
             raise ValueError(reason)
         return self._adapter_registry.build_outbound(node, tag, self._stream_settings)
     

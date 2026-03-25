@@ -5,7 +5,7 @@ Handles active proxies and Xray process management.
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 import sys
 import time
 from datetime import datetime
@@ -111,6 +111,28 @@ class ProxyService:
         """Check runtime status using either the in-memory process or tracked process metadata."""
         return self._get_runner().is_running()
 
+    def _load_runtime_config_ports(self) -> List[int]:
+        """Read actual runtime inbound ports from the generated config file."""
+        if not self.CONFIG_FILE.exists():
+            return []
+        try:
+            with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception as exc:
+            logger.warning("读取当前 Xray 配置失败: %s", exc)
+            return []
+
+        ports: List[int] = []
+        for inbound in config.get("inbounds", []):
+            try:
+                port = inbound.get("port")
+                if port is None:
+                    continue
+                ports.append(int(port))
+            except (TypeError, ValueError):
+                continue
+        return ports
+
     @staticmethod
     def _normalize_proxy_record(proxy: Dict) -> Dict:
         """Normalize persisted proxy fields added by newer versions."""
@@ -130,13 +152,108 @@ class ProxyService:
 
     def _get_runtime_proxy_ports(self) -> List[int]:
         """Return ports that are actually routable by the current Xray process."""
+        self._load_data()
         if self._is_xray_running():
+            runtime_ports = set(self._load_runtime_config_ports())
             return [
-                p["port"]
+                int(p["port"])
                 for p in self._data.get("proxies", [])
-                if self.is_proxy_enabled(p)
+                if self.is_proxy_enabled(p) and int(p["port"]) in runtime_ports
             ]
         return []
+
+    def get_runtime_proxy_ports(self) -> List[int]:
+        """Public wrapper for routes/services that need actual runtime ports."""
+        self._load_data()
+        return self._get_runtime_proxy_ports()
+
+    def _get_source_node_data(self, node_id: str) -> Optional[Dict[str, Any]]:
+        node_data = get_subscription_service().get_node(node_id)
+        if node_data:
+            return node_data
+        return get_custom_group_service().get_node(node_id)
+
+    @staticmethod
+    def _node_data_to_proxy_node(node_data: Dict[str, Any]) -> ProxyNode:
+        network_value = node_data.get("network", "tcp")
+        try:
+            network = NetworkType(str(network_value))
+        except ValueError:
+            network = NetworkType.TCP
+        return ProxyNode(
+            name=node_data["name"],
+            protocol=Protocol(node_data["protocol"]),
+            address=node_data["address"],
+            port=node_data["port"],
+            uuid=node_data.get("uuid"),
+            password=node_data.get("password"),
+            security=node_data.get("security", "auto"),
+            network=network,
+            tls=node_data.get("tls", False),
+            sni=node_data.get("sni"),
+            allow_insecure=node_data.get("allow_insecure", False),
+            path=node_data.get("ws_path"),
+            host=node_data.get("ws_host"),
+            service_name=node_data.get("grpc_service_name"),
+            fingerprint=node_data.get("fingerprint"),
+            alter_id=int(node_data.get("alter_id", 0)),
+            flow=node_data.get("flow"),
+            public_key=node_data.get("public_key"),
+            short_id=node_data.get("short_id"),
+            hy_obfs=node_data.get("hy_obfs"),
+            hy_obfs_password=node_data.get("hy_obfs_password"),
+            hy_alpn=node_data.get("hy_alpn"),
+            ss_plugin=node_data.get("ss_plugin"),
+            ss_plugin_opts=node_data.get("ss_plugin_opts"),
+            ss_uot=node_data.get("ss_uot"),
+            ss_uot_version=node_data.get("ss_uot_version"),
+            raw_network=node_data.get("raw_network"),
+            parse_degraded=bool(node_data.get("parse_degraded", False)),
+            parse_degraded_reason=node_data.get("parse_degraded_reason"),
+        )
+
+    def get_proxy_runtime_metadata(
+        self,
+        proxy: Dict[str, Any],
+        *,
+        runtime_ports: Optional[set[int]] = None,
+        xray_running: Optional[bool] = None,
+    ) -> Dict[str, Optional[str] | bool]:
+        """Describe whether a pool proxy is currently loaded into Xray runtime."""
+        node_data = self._get_source_node_data(proxy["node_id"])
+        if not node_data:
+            return {
+                "runtime_loaded": False,
+                "runtime_load_reason": "源节点记录不存在，当前无法加载到 Xray",
+            }
+
+        capability = evaluate_node_runtime(node_data)
+        if not capability.runtime_supported:
+            return {
+                "runtime_loaded": False,
+                "runtime_load_reason": capability.reason or "当前节点不可运行",
+            }
+
+        if xray_running is None:
+            xray_running = self._is_xray_running()
+        if not xray_running:
+            return {
+                "runtime_loaded": False,
+                "runtime_load_reason": "Xray 未运行",
+            }
+
+        if runtime_ports is None:
+            runtime_ports = set(self._get_runtime_proxy_ports())
+        if int(proxy["port"]) not in runtime_ports:
+            return {
+                "runtime_loaded": False,
+                "runtime_load_reason": "当前节点未加载到 Xray 运行配置",
+            }
+
+        return {
+            "runtime_loaded": True,
+            "runtime_load_reason": None,
+        }
 
     def _sync_health_runtime_state(self, ensure_monitoring: bool = False) -> None:
         """
@@ -379,41 +496,10 @@ class ProxyService:
         for proxy in self._data.get("proxies", []):
             if not self.is_proxy_enabled(proxy):
                 continue
-            node_data = get_subscription_service().get_node(proxy["node_id"])
-            if not node_data:
-                node_data = get_custom_group_service().get_node(proxy["node_id"])
+            node_data = self._get_source_node_data(proxy["node_id"])
             if not node_data:
                 continue
-            
-            # Map stored field names to ProxyNode field names
-            proxy_node = ProxyNode(
-                name=node_data["name"],
-                protocol=Protocol(node_data["protocol"]),
-                address=node_data["address"],
-                port=node_data["port"],
-                uuid=node_data.get("uuid"),
-                password=node_data.get("password"),
-                security=node_data.get("security", "auto"),
-                network=NetworkType(node_data.get("network", "tcp")),
-                tls=node_data.get("tls", False),
-                sni=node_data.get("sni"),
-                allow_insecure=node_data.get("allow_insecure", False),
-                path=node_data.get("ws_path"),  # ws_path -> path
-                host=node_data.get("ws_host"),  # ws_host -> host
-                service_name=node_data.get("grpc_service_name"),  # grpc_service_name -> service_name
-                fingerprint=node_data.get("fingerprint"),
-                alter_id=int(node_data.get("alter_id", 0)),
-                flow=node_data.get("flow"),
-                public_key=node_data.get("public_key"),
-                short_id=node_data.get("short_id"),
-                hy_obfs=node_data.get("hy_obfs"),
-                hy_obfs_password=node_data.get("hy_obfs_password"),
-                hy_alpn=node_data.get("hy_alpn"),
-                ss_plugin=node_data.get("ss_plugin"),
-                ss_plugin_opts=node_data.get("ss_plugin_opts"),
-                ss_uot=node_data.get("ss_uot"),
-                ss_uot_version=node_data.get("ss_uot_version"),
-            )
+            proxy_node = self._node_data_to_proxy_node(node_data)
             capability = evaluate_node_runtime(proxy_node)
             if not capability.runtime_supported:
                 reason = capability.reason or f"不支持的协议: {proxy_node.protocol.value}"
@@ -428,10 +514,7 @@ class ProxyService:
     def _regenerate_config(self) -> str:
         """Regenerate Xray configuration file."""
         proxy_nodes = self._build_proxy_nodes()
-        
-        if not proxy_nodes:
-            return str(self.CONFIG_FILE)
-        
+
         # Create port mappings
         from src.xray_prism.models import PortMapping
         port_mappings = []
@@ -461,6 +544,13 @@ class ProxyService:
             self._sync_health_runtime_state()
             return
 
+        runnable_nodes = self._build_proxy_nodes()
+        if not runnable_nodes:
+            runner.stop()
+            self._start_time = None
+            self._sync_health_runtime_state()
+            return
+
         config_path = self._regenerate_config()
         runner.stop()
         time.sleep(0.5)
@@ -478,6 +568,10 @@ class ProxyService:
         if not self.get_all_proxies(include_disabled=False):
             self._sync_health_runtime_state()
             return {"success": False, "message": "No enabled proxies configured", "status": "stopped"}
+
+        if not self._build_proxy_nodes():
+            self._sync_health_runtime_state()
+            return {"success": False, "message": "No runnable proxies configured", "status": "stopped"}
         
         # Generate config
         config_path = self._regenerate_config()
@@ -544,10 +638,15 @@ class ProxyService:
     def test_all_proxies(self, timeout: int = 5, workers: int = 20, attempts: int = 1) -> Dict[str, object]:
         """Test all active proxies, optionally retrying each proxy multiple times."""
         self._load_data()
-        
+
+        # Ensure Xray is running
+        if not self._is_xray_running():
+            raise RuntimeError("Xray is not running. Please start Xray first.")
+
+        runtime_ports = set(self.get_runtime_proxy_ports())
         active_proxies = [
             proxy for proxy in self._data.get("proxies", [])
-            if self.is_proxy_enabled(proxy)
+            if self.is_proxy_enabled(proxy) and int(proxy["port"]) in runtime_ports
         ]
         if not active_proxies:
             return {
@@ -557,10 +656,6 @@ class ProxyService:
                 "attempts": max(1, attempts),
                 "cooldown_candidates": [],
             }
-        
-        # Ensure Xray is running
-        if not self._is_xray_running():
-            raise RuntimeError("Xray is not running. Please start Xray first.")
         
         # Build proxy nodes and port mappings for tester
         proxy_nodes = self._build_proxy_nodes()
@@ -661,6 +756,8 @@ class ProxyService:
         # Ensure Xray is running
         if not self._is_xray_running():
             raise RuntimeError("Xray is not running. Please start Xray first.")
+        if port not in set(self.get_runtime_proxy_ports()):
+            raise ValueError(f"Proxy on port {port} is not loaded into current Xray runtime")
         
         tester = ProxyTester(timeout=timeout, max_workers=1)
         result = tester.test_port(port, proxy["node_name"])

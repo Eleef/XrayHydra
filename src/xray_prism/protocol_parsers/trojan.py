@@ -6,7 +6,7 @@ Trojan protocol parser.
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..models import Protocol, ProxyNode
-from .base import ParseError, parse_network_type
+from .base import ParseError, resolve_network_type
 
 
 def parse_trojan(uri: str) -> ProxyNode:
@@ -19,7 +19,8 @@ def parse_trojan(uri: str) -> ProxyNode:
         name = unquote(parsed.fragment) if parsed.fragment else "Unknown"
         params = parse_qs(parsed.query)
 
-        network = parse_network_type(params.get("type", ["tcp"])[0])
+        parsed_network = resolve_network_type(params.get("type", ["tcp"])[0])
+        network = parsed_network.network
         tls_type = params.get("security", ["tls"])[0]
         tls = tls_type != "none"
         sni = params.get("sni", [None])[0]
@@ -46,6 +47,13 @@ def parse_trojan(uri: str) -> ProxyNode:
             host=host,
             path=path,
             service_name=service_name,
+            raw_network=parsed_network.unsupported_raw_value,
+            parse_degraded=parsed_network.unsupported_raw_value is not None,
+            parse_degraded_reason=(
+                f"当前节点使用了未支持的 network 传输类型: {parsed_network.unsupported_raw_value}"
+                if parsed_network.unsupported_raw_value
+                else None
+            ),
         )
     except Exception as exc:
         raise ParseError(f"Trojan 解析失败: {exc}")

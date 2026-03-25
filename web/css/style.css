@@ -1264,6 +1264,12 @@ body {
     border-color: rgba(71, 85, 105, 0.24);
 }
 
+.proxy-state.runtime-unavailable {
+    background: rgba(107, 114, 128, 0.14);
+    color: #374151;
+    border-color: rgba(107, 114, 128, 0.38);
+}
+
 .proxy-state-source {
     padding: 1px 6px;
     border-radius: var(--radius-full);
@@ -1275,6 +1281,26 @@ body {
 .proxy-workspace-note {
     font-size: 0.6875rem;
     color: var(--text-muted);
+}
+
+.proxy-lease-metrics {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+    font-size: 0.625rem;
+    line-height: 1.2;
+}
+
+.proxy-metric-scope {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    background: rgba(14, 165, 233, 0.1);
+    color: var(--info);
+    font-weight: 600;
 }
 
 .section-caption {
@@ -1793,6 +1819,12 @@ body {
     animation: none;
 }
 
+.health-indicator.runtime-unavailable {
+    background: #9ca3af;
+    opacity: 0.85;
+    animation: none;
+}
+
 @keyframes pulse-health {
 
     0%,
@@ -1875,6 +1907,17 @@ body {
 .context-menu-item:hover {
     background: var(--bg-tertiary);
     color: var(--text-primary);
+}
+
+.context-menu-item.disabled {
+    color: var(--text-muted);
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.context-menu-item.disabled:hover {
+    background: transparent;
+    color: var(--text-muted);
 }
 
 .context-menu-item svg {
@@ -2056,10 +2099,15 @@ body {
 }
 
 /* ==================== Lease Dashboard ==================== */
+.tab-content#leases-tab {
+    overflow: hidden;
+}
+
 .lease-dashboard {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: var(--spacing-sm);
+    flex-shrink: 0;
 }
 
 .stat-card {
@@ -2103,10 +2151,19 @@ body {
 }
 
 /* ==================== Lease Sections ==================== */
+.lease-split-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--spacing-md);
+    flex: 1;
+    min-height: 0;
+}
+
 .lease-section {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
+    min-height: 0;
 }
 
 .lease-section-header {
@@ -2134,7 +2191,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
-    max-height: 180px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 
@@ -2289,6 +2347,39 @@ body {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
+    flex-shrink: 0;
+}
+
+.lease-playground.collapsed {
+    gap: 0;
+}
+
+.lease-playground-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.lease-playground.collapsed .lease-playground-body {
+    display: none;
+}
+
+.lease-playground-toggle {
+    min-width: 74px;
+}
+
+.lease-playground-toggle svg {
+    width: 14px;
+    height: 14px;
+    transition: transform var(--transition-fast);
+}
+
+.lease-playground.collapsed .lease-playground-toggle svg {
+    transform: rotate(0deg);
+}
+
+.lease-playground:not(.collapsed) .lease-playground-toggle svg {
+    transform: rotate(180deg);
 }
 
 .playground-form {
@@ -2363,4 +2454,10 @@ body {
 .playground-result.error {
     border-color: var(--danger);
     background: var(--danger-bg);
+}
+
+@media (max-width: 1024px) {
+    .lease-split-layout {
+        grid-template-columns: 1fr;
+    }
 }

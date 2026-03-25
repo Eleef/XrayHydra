@@ -343,6 +343,8 @@ class ProxyResponse(BaseModel):
                 "exit_ip": "203.0.113.10",
                 "pool_status": "active",
                 "disabled_reason": None,
+                "runtime_loaded": True,
+                "runtime_load_reason": None,
             }
         }
     )
@@ -363,6 +365,8 @@ class ProxyResponse(BaseModel):
     exit_ip: Optional[str] = None
     pool_status: ProxyPoolStatus = ProxyPoolStatus.ACTIVE
     disabled_reason: Optional[str] = None
+    runtime_loaded: bool = True
+    runtime_load_reason: Optional[str] = None
 
 
 class ProxyListResponse(BaseModel):
@@ -512,7 +516,9 @@ class ProxyHealthResponse(BaseModel):
                 "penalty_remaining_seconds": None,
                 "last_check": "2026-03-07T03:10:00",
                 "last_success": "2026-03-07T03:10:00",
-                "last_latency_ms": 386.12
+                "last_latency_ms": 386.12,
+                "last_error_category": "probe_failed",
+                "last_error_message": "请求超时",
             }
         }
     )
@@ -524,6 +530,8 @@ class ProxyHealthResponse(BaseModel):
     last_check: Optional[datetime] = None
     last_success: Optional[datetime] = None
     last_latency_ms: Optional[float] = None
+    last_error_category: Optional[str] = None
+    last_error_message: Optional[str] = None
 
 
 class HealthStatusListResponse(BaseModel):

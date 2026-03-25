@@ -8,6 +8,7 @@ const GLOBAL_WORKSPACE_ID = '__global__';
 const NODE_EXCLUSION_STORAGE_KEY = 'xray-prism.nodeExclusionKeywords';
 const CURRENT_SUBSCRIPTION_STORAGE_KEY = 'xray-prism.currentSubscriptionId';
 const CURRENT_GROUP_STORAGE_KEY = 'xray-prism.currentGroup';
+const LEASE_PLAYGROUND_COLLAPSED_STORAGE_KEY = 'xray-prism.leasePlaygroundCollapsed';
 
 class App {
     constructor() {
@@ -58,7 +59,11 @@ class App {
             total_active: 0,
             total_cooldowns: 0,
         };
+        this.leaseStats = {
+            proxies_by_usage: [],
+        };
         this.currentWorkspaceId = localStorage.getItem('xray-prism.currentWorkspaceId') || null;
+        this.isLeasePlaygroundCollapsed = localStorage.getItem(LEASE_PLAYGROUND_COLLAPSED_STORAGE_KEY) !== 'false';
         this.pendingTestCooldownReview = null;
         this.pendingExitIpDedupeReview = null;
         this.pendingCustomGroupTargetId = null;
@@ -113,6 +118,8 @@ class App {
             workspaceBarHint: document.getElementById('workspace-bar-hint'),
             btnResetWorkspace: document.getElementById('btn-reset-workspace'),
             cooldownList: document.getElementById('cooldown-list'),
+            leasePlayground: document.getElementById('lease-playground'),
+            btnToggleLeasePlayground: document.getElementById('btn-toggle-lease-playground'),
             modalCreateGroupEntry: document.getElementById('modal-create-group-entry'),
             modalAddSubscription: document.getElementById('modal-add-subscription'),
             btnOpenAddSubscription: document.getElementById('btn-open-add-subscription'),
@@ -297,6 +304,9 @@ class App {
         if (pgAcquire) pgAcquire.addEventListener('click', () => this.playgroundAcquire());
         if (pgRelease) pgRelease.addEventListener('click', () => this.playgroundRelease());
         if (btnRefreshLeases) btnRefreshLeases.addEventListener('click', () => this.refreshLeaseData());
+        if (this.elements.btnToggleLeasePlayground) {
+            this.elements.btnToggleLeasePlayground.addEventListener('click', () => this.toggleLeasePlayground());
+        }
         if (this.elements.btnResetWorkspace) {
             this.elements.btnResetWorkspace.addEventListener('click', () => this.resetCurrentWorkspace());
         }
@@ -313,6 +323,7 @@ class App {
      */
     async loadInitialData() {
         try {
+            this.syncLeasePlaygroundState();
             // Load subscriptions
             await this.loadSubscriptions();
 
@@ -2113,11 +2124,23 @@ class App {
     }
 
     getEnabledProxies() {
-        return (this.proxies || []).filter((proxy) => proxy?.pool_status !== 'dedupe_disabled');
+        return (this.proxies || []).filter((proxy) => (
+            proxy?.pool_status !== 'dedupe_disabled' && this.isProxyRuntimeLoaded(proxy)
+        ));
     }
 
     getProxyByPort(port) {
         return (this.proxies || []).find((proxy) => proxy?.port === port) || null;
+    }
+
+    isProxyRuntimeLoaded(proxy) {
+        return proxy?.runtime_loaded !== false;
+    }
+
+    getProxyRuntimeLoadReason(proxy) {
+        return proxy?.runtime_load_reason
+            || proxy?.runtime_support_reason
+            || '该代理已在代理池中，但当前未加载到 Xray 运行配置。';
     }
 
     /**
@@ -2159,6 +2182,12 @@ class App {
     getProxyWorkspaceState(proxy) {
         const activeLeases = this.leaseStatus.active_leases || [];
         const cooldowns = this.leaseStatus.cooldowns || [];
+        const activeLeaseForPort = activeLeases.find((lease) => lease.proxy_port === proxy.port);
+        const cooldownsForPort = cooldowns.filter((item) => item.proxy_port === proxy.port);
+        const metricsDisplay = this.getProxyMetricsDisplay(proxy, {
+            activeLease: activeLeaseForPort,
+            cooldowns: cooldownsForPort,
+        });
 
         if (proxy?.pool_status === 'dedupe_disabled') {
             return {
@@ -2166,10 +2195,36 @@ class App {
                 stateLabel: '去重禁用',
                 sourceLabel: 'exit-ip',
                 note: '该代理因重复出口 IP 被禁用，仍保留在代理池中以避免重复加入。',
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                 canCopy: false,
                 canTest: false,
                 canCooldown: false,
                 canRecall: false,
+                testTitle: '去重禁用代理不可测试',
+                cooldownTitle: '去重禁用代理不参与冷却',
+                recallTitle: '去重禁用代理不参与召回',
+            };
+        }
+
+        if (!this.isProxyRuntimeLoaded(proxy)) {
+            const reason = this.getProxyRuntimeLoadReason(proxy);
+            return {
+                stateClass: 'runtime-unavailable',
+                stateLabel: '未加载到Xray',
+                sourceLabel: 'runtime',
+                note: reason,
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
+                canCopy: true,
+                canTest: false,
+                canCooldown: false,
+                canRecall: false,
+                testTitle: reason,
+                cooldownTitle: reason,
+                recallTitle: reason,
             };
         }
 
@@ -2179,29 +2234,39 @@ class App {
                 stateLabel: '未选择 workspace',
                 sourceLabel: '',
                 note: '请选择一个已有 workspace 后再做手动管理。',
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                 canCopy: true,
                 canTest: true,
                 canCooldown: false,
                 canRecall: false,
+                cooldownTitle: '请先选择具体 workspace 后再手动冷却',
+                recallTitle: '当前不在冷却状态',
             };
         }
 
         if (this.isAllWorkspacesSelected()) {
-            const activeLease = activeLeases.find((lease) => lease.proxy_port === proxy.port);
+            const activeLease = activeLeaseForPort;
             if (activeLease) {
                 return {
                     stateClass: 'leased',
                     stateLabel: '已租约中',
                     sourceLabel: '',
                     note: `${activeLease.workspace_id} 正在使用该代理。`,
+                    metrics: metricsDisplay.metrics,
+                    metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                    showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                     canCopy: true,
                     canTest: true,
                     canCooldown: false,
                     canRecall: false,
+                    cooldownTitle: '租约中代理不可手动冷却',
+                    recallTitle: '该代理当前不在冷却状态',
                 };
             }
 
-            const globalCooldown = cooldowns.find(
+            const globalCooldown = cooldownsForPort.find(
                 (item) => item.workspace_id === GLOBAL_WORKSPACE_ID && item.proxy_port === proxy.port
             );
             if (globalCooldown) {
@@ -2212,10 +2277,14 @@ class App {
                     note: globalCooldown.source === 'manual'
                         ? '该代理已被手动加入全局冷却，需手动召回。'
                         : '该代理正处于全局定时冷却，可等待到期或手动召回。',
+                    metrics: metricsDisplay.metrics,
+                    metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                    showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                     canCopy: true,
                     canTest: true,
                     canCooldown: false,
                     canRecall: true,
+                    cooldownTitle: '冷却中代理不可重复冷却',
                 };
             }
 
@@ -2224,14 +2293,19 @@ class App {
                 stateLabel: '全局视图',
                 sourceLabel: '',
                 note: '请选择具体 workspace 进行手动冷却；测试全部可使用全局冷却。',
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                 canCopy: true,
                 canTest: true,
                 canCooldown: false,
                 canRecall: false,
+                cooldownTitle: '请先选择具体 workspace 后再手动冷却',
+                recallTitle: '当前不在冷却状态',
             };
         }
 
-        const globalCooldown = cooldowns.find(
+        const globalCooldown = cooldownsForPort.find(
             (item) => item.workspace_id === GLOBAL_WORKSPACE_ID && item.proxy_port === proxy.port
         );
         if (globalCooldown) {
@@ -2240,10 +2314,15 @@ class App {
                 stateLabel: '全局冷却中',
                 sourceLabel: globalCooldown.source === 'manual' ? 'manual' : 'timed',
                 note: '该代理已被全局冷却，请切换到“所有代理”后再召回。',
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                 canCopy: true,
                 canTest: true,
                 canCooldown: false,
                 canRecall: false,
+                cooldownTitle: '全局冷却中代理不可重复冷却',
+                recallTitle: '请切换到“所有代理”视图召回',
             };
         }
 
@@ -2256,10 +2335,15 @@ class App {
                 stateLabel: '已租约中',
                 sourceLabel: '',
                 note: `${this.currentWorkspaceId} 正在使用该代理。`,
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                 canCopy: true,
                 canTest: true,
                 canCooldown: false,
                 canRecall: false,
+                cooldownTitle: '租约中代理不可手动冷却',
+                recallTitle: '该代理当前不在冷却状态',
             };
         }
 
@@ -2276,10 +2360,14 @@ class App {
                 stateLabel: '冷却中',
                 sourceLabel,
                 note,
+                metrics: metricsDisplay.metrics,
+                metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+                showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
                 canCopy: true,
                 canTest: true,
                 canCooldown: false,
                 canRecall: true,
+                cooldownTitle: '冷却中代理不可重复冷却',
             };
         }
 
@@ -2288,10 +2376,87 @@ class App {
             stateLabel: '可用',
             sourceLabel: '',
             note: `${this.currentWorkspaceId} 可手动冷却该代理。`,
+            metrics: metricsDisplay.metrics,
+            metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
+            showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
             canCopy: true,
             canTest: true,
             canCooldown: true,
             canRecall: false,
+            recallTitle: '该代理当前不在冷却状态',
+        };
+    }
+
+    getLeaseMetricEntriesForPort(port) {
+        return (this.leaseStats?.proxies_by_usage || [])
+            .filter((item) => Number(item?.port) === Number(port));
+    }
+
+    rankLeaseMetricEntry(entry) {
+        return [
+            Number(entry?.usage_count ?? 0),
+            Number(entry?.success_count ?? 0),
+            -Number(entry?.failure_count ?? 0),
+            String(entry?.workspace_id || ''),
+        ];
+    }
+
+    compareLeaseMetricEntries(a, b) {
+        const left = this.rankLeaseMetricEntry(a);
+        const right = this.rankLeaseMetricEntry(b);
+        for (let index = 0; index < left.length; index += 1) {
+            if (left[index] === right[index]) continue;
+            return left[index] > right[index] ? -1 : 1;
+        }
+        return 0;
+    }
+
+    buildEmptyLeaseMetrics() {
+        return {
+            usage_count: 0,
+            success_count: 0,
+            failure_count: 0,
+            last_used_at: null,
+        };
+    }
+
+    getProxyMetricsDisplay(proxy, context = {}) {
+        const entries = this.getLeaseMetricEntriesForPort(proxy.port);
+        const activeLease = context.activeLease || null;
+        const cooldowns = Array.isArray(context.cooldowns) ? context.cooldowns : [];
+
+        if (!this.currentWorkspaceId) {
+            return {
+                metrics: entries[0] || this.buildEmptyLeaseMetrics(),
+                workspaceLabel: entries[0]?.workspace_id ? this.getWorkspaceDisplayLabel(entries[0].workspace_id) : null,
+                showWorkspaceLabel: Boolean(entries[0]?.workspace_id),
+            };
+        }
+
+        if (!this.isAllWorkspacesSelected()) {
+            const entry = entries.find((item) => item.workspace_id === this.currentWorkspaceId);
+            return {
+                metrics: entry || this.buildEmptyLeaseMetrics(),
+                workspaceLabel: this.currentWorkspaceId,
+                showWorkspaceLabel: false,
+            };
+        }
+
+        const preferredWorkspaceId = activeLease?.workspace_id
+            || cooldowns.find((item) => item.workspace_id !== GLOBAL_WORKSPACE_ID)?.workspace_id
+            || null;
+        const preferredEntry = preferredWorkspaceId
+            ? entries.find((item) => item.workspace_id === preferredWorkspaceId)
+            : null;
+        const fallbackEntry = entries.slice().sort((a, b) => this.compareLeaseMetricEntries(a, b))[0] || null;
+        const entry = preferredEntry || fallbackEntry;
+
+        return {
+            metrics: entry || this.buildEmptyLeaseMetrics(),
+            workspaceLabel: (entry?.workspace_id || preferredWorkspaceId)
+                ? this.getWorkspaceDisplayLabel(entry?.workspace_id || preferredWorkspaceId)
+                : null,
+            showWorkspaceLabel: Boolean(entry?.workspace_id || preferredWorkspaceId),
         };
     }
 
@@ -2362,6 +2527,10 @@ class App {
             Components.showToast('该代理已被去重禁用，不能参与测试', 'warning');
             return;
         }
+        if (proxy && !this.isProxyRuntimeLoaded(proxy)) {
+            Components.showToast(this.getProxyRuntimeLoadReason(proxy), 'warning');
+            return;
+        }
         if (this.xrayStatus !== 'running') {
             Components.showToast('请先启动 Xray', 'warning');
             return;
@@ -2401,6 +2570,10 @@ class App {
             Components.showToast('去重禁用代理不参与冷却管理', 'warning');
             return;
         }
+        if (proxy && !this.isProxyRuntimeLoaded(proxy)) {
+            Components.showToast(this.getProxyRuntimeLoadReason(proxy), 'warning');
+            return;
+        }
         if (!this.currentWorkspaceId) {
             Components.showToast('请先选择一个 workspace', 'warning');
             return;
@@ -2421,6 +2594,16 @@ class App {
     }
 
     async recallCooldown(port, workspaceId = null) {
+        const proxy = this.getProxyByPort(port);
+        if (proxy?.pool_status === 'dedupe_disabled') {
+            Components.showToast('去重禁用代理不参与召回', 'warning');
+            return;
+        }
+        if (proxy && !this.isProxyRuntimeLoaded(proxy)) {
+            Components.showToast(this.getProxyRuntimeLoadReason(proxy), 'warning');
+            return;
+        }
+
         const selectedWorkspaceId = workspaceId || this.currentWorkspaceId;
         if (!selectedWorkspaceId) {
             Components.showToast('请先选择一个 workspace', 'warning');
@@ -2689,6 +2872,12 @@ class App {
                 return;
             }
 
+            if (!this.isProxyRuntimeLoaded(proxy)) {
+                indicator.className = 'health-indicator runtime-unavailable';
+                indicator.title = `未加载到 Xray | ${this.getProxyRuntimeLoadReason(proxy)}`;
+                return;
+            }
+
             indicator.className = `health-indicator ${health.status}`;
             indicator.title = this.getHealthTooltip(health);
         });
@@ -2712,6 +2901,19 @@ class App {
 
         if (health.last_latency_ms) {
             tooltip += ` | 延迟: ${health.last_latency_ms}ms`;
+        }
+
+        const category = (health.last_error_category || '').trim();
+        const message = (health.last_error_message || '').trim();
+        if (category) {
+            const categoryLabelMap = {
+                runtime_unavailable: '运行不可用',
+                probe_failed: '探测失败',
+            };
+            tooltip += ` | 分类: ${categoryLabelMap[category] || category}`;
+        }
+        if (message) {
+            tooltip += ` | ${message}`;
         }
 
         return tooltip;
@@ -2761,6 +2963,8 @@ class App {
         if (existing) existing.remove();
 
         const health = this.getHealthForPort(port);
+        const proxy = this.getProxyByPort(port);
+        const runtimeReady = proxy ? this.isProxyRuntimeLoaded(proxy) : true;
 
         const menu = document.createElement('div');
         menu.className = 'context-menu active';
@@ -2775,7 +2979,7 @@ class App {
                 </svg>
                 复制地址
             </div>
-            <div class="context-menu-item" data-action="test">
+            <div class="context-menu-item${runtimeReady ? '' : ' disabled'}" data-action="test">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                     <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -2783,7 +2987,7 @@ class App {
                 测试连通性
             </div>
             <div class="context-menu-separator"></div>
-            <div class="context-menu-item" data-action="reset-health">
+            <div class="context-menu-item${runtimeReady ? '' : ' disabled'}" data-action="reset-health">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
                     <path d="M21 3v5h-5"></path>
@@ -2808,6 +3012,7 @@ class App {
         menu.addEventListener('click', async (e) => {
             const item = e.target.closest('.context-menu-item');
             if (!item) return;
+            if (item.classList.contains('disabled')) return;
 
             const action = item.dataset.action;
             menu.remove();
@@ -2854,7 +3059,31 @@ class App {
 
         // Load lease data when switching to leases tab
         if (tabName === 'leases') {
+            this.syncLeasePlaygroundState();
             this.refreshLeaseData();
+        }
+    }
+
+    toggleLeasePlayground() {
+        this.isLeasePlaygroundCollapsed = !this.isLeasePlaygroundCollapsed;
+        localStorage.setItem(
+            LEASE_PLAYGROUND_COLLAPSED_STORAGE_KEY,
+            this.isLeasePlaygroundCollapsed ? 'true' : 'false'
+        );
+        this.syncLeasePlaygroundState();
+    }
+
+    syncLeasePlaygroundState() {
+        const playground = this.elements.leasePlayground;
+        const toggleButton = this.elements.btnToggleLeasePlayground;
+        if (!playground || !toggleButton) return;
+
+        playground.classList.toggle('collapsed', this.isLeasePlaygroundCollapsed);
+        toggleButton.setAttribute('aria-expanded', this.isLeasePlaygroundCollapsed ? 'false' : 'true');
+
+        const textEl = toggleButton.querySelector('.lease-playground-toggle-text');
+        if (textEl) {
+            textEl.textContent = this.isLeasePlaygroundCollapsed ? '展开' : '收起';
         }
     }
 
@@ -2868,6 +3097,7 @@ class App {
                 api.getLeaseStatus()
             ]);
 
+            this.leaseStats = stats || { proxies_by_usage: [] };
             this.leaseStatus = {
                 active_leases: status.active_leases || [],
                 cooldowns: status.cooldowns || [],
