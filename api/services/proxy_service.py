@@ -154,6 +154,8 @@ class ProxyService:
                 health_service.start_monitoring(
                     lambda: self._get_runtime_proxy_ports()
                 )
+                # Xray 刚启动时立即跑一轮检测，避免沿用旧的 disabled 状态导致租约归零。
+                health_service.run_health_check(active_ports)
         else:
             health_service.stop_monitoring()
     

@@ -284,7 +284,13 @@ class HealthMonitor:
             state = self.get_or_create_state(port)
             if state.status != HealthStatus.DISABLED:
                 ports_to_check.append(port)
-        
+
+        # 当所有端口都被标记为 disabled 时，允许做一轮恢复探测。
+        # 否则系统会进入“全部禁用 -> 永不再探测 -> 永不恢复”的死锁。
+        if not ports_to_check and ports:
+            ports_to_check = list(ports)
+            logger.warning("所有代理当前均为 disabled，执行恢复探测")
+
         if not ports_to_check:
             logger.debug("没有需要检测的代理")
             return self._health_states

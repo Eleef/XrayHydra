@@ -177,6 +177,22 @@ class TestProxyService(unittest.TestCase):
         self.assertEqual(config["inbounds"][0]["port"], 10022)
         self.assertTrue(config["inbounds"][0]["settings"]["udp"])
 
+    def test_sync_health_runtime_state_runs_immediate_probe_after_start(self):
+        self._write_proxies([
+            {"port": 10022, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443},
+        ])
+        self.service._load_data()
+        self.service._runner = MagicMock()
+        self.service._runner.is_running.return_value = True
+
+        mock_health_service = MagicMock()
+        with patch("api.services.proxy_service.get_health_service", return_value=mock_health_service):
+            self.service._sync_health_runtime_state(ensure_monitoring=True)
+
+        mock_health_service.sync_with_proxies.assert_called_once_with([10022])
+        mock_health_service.start_monitoring.assert_called_once()
+        mock_health_service.run_health_check.assert_called_once_with([10022])
+
     def test_get_exit_ip_duplicate_groups_prefers_lowest_latency_success_proxy(self):
         self._write_proxies([
             {"port": 10000, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443, "test_status": "success", "latency_ms": 620, "exit_ip": "203.0.113.10"},

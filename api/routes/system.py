@@ -11,6 +11,7 @@ from api.schemas.models import (
 )
 from api.services.proxy_service import get_proxy_service
 from api.services.subscription_service import get_subscription_service
+from src.xray_prism.runner import XRAY_VERSION
 
 router = APIRouter(prefix="/api/system", tags=["System"])
 
@@ -28,7 +29,7 @@ async def get_system_status():
     
     return SystemStatusResponse(
         xray_status=xray_status,
-        xray_version="v24.12.18",  # TODO: Get dynamically
+        xray_version=XRAY_VERSION,
         active_proxy_count=len(proxies),
         subscription_count=len(subscriptions),
         uptime_seconds=uptime

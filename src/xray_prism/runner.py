@@ -9,6 +9,7 @@ import logging
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -23,7 +24,8 @@ import tempfile
 logger = logging.getLogger(__name__)
 
 # Xray 下载配置
-XRAY_VERSION = "v24.12.18"
+# Hysteria outbound/transport (version 2) landed in Xray-core v26.1.13.
+XRAY_VERSION = "v26.1.13"
 XRAY_DOWNLOAD_BASE = f"https://github.com/XTLS/Xray-core/releases/download/{XRAY_VERSION}"
 
 
@@ -90,6 +92,59 @@ class XrayRunner:
         self.process_info_file = Path(process_info_file) if process_info_file else (self.data_dir / "xray_runner.json")
         self._xray_path = xray_path
         self._process: Optional[subprocess.Popen] = None
+
+    @staticmethod
+    def _parse_version_tuple(version: Optional[str]) -> Optional[tuple[int, ...]]:
+        """Convert version strings like `v26.1.13` to comparable tuples."""
+        if not version:
+            return None
+        match = re.search(r"v?(\d+)\.(\d+)\.(\d+)", version)
+        if not match:
+            return None
+        return tuple(int(part) for part in match.groups())
+
+    def get_binary_version(self, xray_path: str) -> Optional[str]:
+        """Read the Xray binary version from `xray version` output."""
+        try:
+            result = subprocess.run(
+                [xray_path, "version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception as e:
+            logger.warning(f"读取 Xray 版本失败 ({xray_path}): {e}")
+            return None
+
+        output = (result.stdout or "") + "\n" + (result.stderr or "")
+        match = re.search(r"\bXray\s+(\d+\.\d+\.\d+)\b", output)
+        if not match:
+            return None
+        return f"v{match.group(1)}"
+
+    def is_binary_compatible(self, xray_path: str, minimum_version: str = XRAY_VERSION) -> bool:
+        """Return whether the binary meets the minimum runtime version."""
+        installed = self._parse_version_tuple(self.get_binary_version(xray_path))
+        required = self._parse_version_tuple(minimum_version)
+        if not installed or not required:
+            return False
+        return installed >= required
+
+    def validate_config(self, config_path: str, xray_path: Optional[str] = None) -> tuple[bool, str]:
+        """Validate a config file with `xray run -test` before launching."""
+        xray = xray_path or self.xray_path
+        result = subprocess.run(
+            [xray, "run", "-test", "-config", str(Path(config_path).absolute())],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode == 0:
+            return True, ""
+        message = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
+        return False, message.splitlines()[-1] if message else "Xray config validation failed"
 
     def _normalize_path(self, path: Optional[str]) -> Optional[str]:
         """标准化路径，便于跨平台比较。"""
@@ -358,14 +413,18 @@ class XrayRunner:
         # 1. 检查项目 bin 目录
         local_path = self.xray_dir / exe_name
         if local_path.exists():
-            logger.info(f"在项目目录找到 Xray: {local_path}")
-            return str(local_path)
+            if self.is_binary_compatible(str(local_path)):
+                logger.info(f"在项目目录找到兼容的 Xray: {local_path}")
+                return str(local_path)
+            logger.warning(f"项目目录 Xray 版本过旧，需升级到 {XRAY_VERSION}: {local_path}")
         
         # 2. 检查系统 PATH
         path_xray = shutil.which("xray")
         if path_xray:
-            logger.info(f"在系统 PATH 找到 Xray: {path_xray}")
-            return path_xray
+            if self.is_binary_compatible(path_xray):
+                logger.info(f"在系统 PATH 找到兼容的 Xray: {path_xray}")
+                return path_xray
+            logger.warning(f"系统 PATH 中的 Xray 版本过旧，需升级到 {XRAY_VERSION}: {path_xray}")
         
         # 3. 检查常见安装路径
         common_paths = []
@@ -390,8 +449,10 @@ class XrayRunner:
         
         for path in common_paths:
             if path.exists():
-                logger.info(f"在常见路径找到 Xray: {path}")
-                return str(path)
+                if self.is_binary_compatible(str(path)):
+                    logger.info(f"在常见路径找到兼容的 Xray: {path}")
+                    return str(path)
+                logger.warning(f"常见路径 Xray 版本过旧，需升级到 {XRAY_VERSION}: {path}")
         
         return None
     
@@ -462,11 +523,17 @@ class XrayRunner:
             # 服务重启后尝试接管并停止自己上次启动的 Xray，避免误伤其他实例。
             self._stop_tracked_process()
         
-        xray = self.xray_path
+        xray = self.find_xray()
+        if not xray:
+            xray = self.download_xray(force=True)
         config = Path(config_path).absolute()
         
         if not config.exists():
             raise FileNotFoundError(f"配置文件不存在: {config}")
+
+        config_ok, config_error = self.validate_config(str(config), xray_path=xray)
+        if not config_ok:
+            raise RuntimeError(config_error)
         
         cmd = [xray, "run", "-config", str(config)]
         logger.info(f"启动 Xray: {' '.join(cmd)}")
@@ -489,7 +556,15 @@ class XrayRunner:
             creationflags=creationflags,
             start_new_session=start_new_session
         )
-        
+
+        # 如果进程在启动后立刻退出，直接抛出错误，不让上层误报“运行中”。
+        time.sleep(0.5)
+        if self._process.poll() is not None:
+            stdout, stderr = self._process.communicate()
+            self._process = None
+            message = (stderr or stdout or b"").decode("utf-8", errors="ignore").strip()
+            raise RuntimeError(message.splitlines()[-1] if message else "Xray 启动失败")
+
         self._write_process_metadata(self._process.pid, xray, str(config))
         logger.info(f"Xray 已启动，PID: {self._process.pid}")
         return self._process

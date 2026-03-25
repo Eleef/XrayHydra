@@ -34,7 +34,8 @@ class TestXrayRunner(unittest.TestCase):
         process.pid = 4321
         process.poll.return_value = None
 
-        with patch("src.xray_prism.runner.subprocess.Popen", return_value=process):
+        with patch.object(self.runner, "validate_config", return_value=(True, "")), \
+             patch("src.xray_prism.runner.subprocess.Popen", return_value=process):
             self.runner.start(str(self.config_path))
 
         metadata = json.loads(self.runner.process_info_file.read_text(encoding="utf-8"))

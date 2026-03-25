@@ -46,6 +46,20 @@ class TestLeaseManager(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error, "no_available_proxy")
 
+    def test_acquire_no_available_proxy_reports_all_disabled_message(self):
+        mock_health_service = MagicMock()
+        mock_health_service.get_all_health_states.return_value = [
+            {"proxy_port": 10001, "status": "disabled"},
+            {"proxy_port": 10002, "status": "disabled"},
+        ]
+
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[]), \
+             patch("api.services.lease_service.get_health_service", return_value=mock_health_service):
+            result = self.manager.acquire("workspace_a", ttl=60)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.message, "当前没有可分配代理：所有代理均处于健康禁用状态")
+
     def test_workspace_isolation(self):
         with patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
             result_a = self.manager.acquire("workspace_a", ttl=60)

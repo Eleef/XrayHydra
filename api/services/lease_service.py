@@ -166,6 +166,14 @@ class LeaseManager:
         
         logger.debug(f"Found {len(available_ports)} available ports (healthy/degraded)")
         return available_ports
+
+    def _build_no_available_message(self) -> str:
+        """Return a more precise lease exhaustion message."""
+        health_service = get_health_service()
+        states = health_service.get_all_health_states()
+        if states and all(state.get("status") == "disabled" for state in states):
+            return "当前没有可分配代理：所有代理均处于健康禁用状态"
+        return "所有代理均被占用或冷却中"
     
     def _get_available_ports(self, workspace_id: str) -> List[int]:
         """
@@ -278,7 +286,7 @@ class LeaseManager:
                 return LeaseResult(
                     success=False,
                     error="no_available_proxy",
-                    message="所有代理均被占用或冷却中"
+                    message=self._build_no_available_message()
                 )
             
             # 3. Select LRU port

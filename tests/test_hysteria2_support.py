@@ -31,7 +31,7 @@ class TestHysteria2Support(unittest.TestCase):
         config = ConfigGenerator(inbound_protocol="socks").generate([node])
         outbound = config["outbounds"][0]
 
-        self.assertEqual(outbound["protocol"], "hysteria2")
+        self.assertEqual(outbound["protocol"], "hysteria")
         self.assertEqual(outbound["settings"]["address"], "example.com")
         self.assertEqual(outbound["settings"]["port"], 8443)
         self.assertEqual(outbound["streamSettings"]["network"], "hysteria")

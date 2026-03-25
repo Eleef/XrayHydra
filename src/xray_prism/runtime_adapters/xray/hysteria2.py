@@ -35,11 +35,11 @@ def build_hysteria2_outbound(node: ProxyNode, tag: str, _stream_builder: StreamS
 
     return {
         "tag": tag,
-        "protocol": "hysteria2",
+        # Xray-core uses the `hysteria` outbound protocol with version=2 transport settings.
+        "protocol": "hysteria",
         "settings": {
             "address": node.address,
             "port": node.port,
         },
         "streamSettings": stream_settings,
     }
-

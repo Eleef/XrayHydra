@@ -425,7 +425,7 @@ class SystemStatusResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "xray_status": "running",
-                "xray_version": "v24.12.18",
+                "xray_version": "v26.1.13",
                 "active_proxy_count": 39,
                 "subscription_count": 1,
                 "uptime_seconds": 120
