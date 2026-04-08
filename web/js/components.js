@@ -173,7 +173,7 @@ const Components = {
 
         const latencyClass = this.getLatencyClass(proxy.latency_ms);
         const latencyText = proxy.latency_ms ? `${proxy.latency_ms}ms` : '--';
-        const ipText = proxy.exit_ip || '--';
+        const ipText = proxy.exit_ip ? `出口IP ${proxy.exit_ip}` : '出口IP --';
         const state = workspaceState || {
             stateClass: 'unscoped',
             stateLabel: '未选择 workspace',
@@ -198,7 +198,7 @@ const Components = {
                     <span class="proxy-name">${this.escapeHtml(proxy.node_name)}</span>
                     <div class="proxy-meta">
                         <span class="node-protocol">${proxy.protocol}</span>
-                        ${proxy.exit_ip ? `<span class="proxy-ip">${ipText}</span>` : ''}
+                        <span class="proxy-ip">${this.escapeHtml(ipText)}</span>
                         ${proxy.latency_ms ? `<span class="proxy-latency ${latencyClass}">${latencyText}</span>` : ''}
                     </div>
                     <span class="proxy-workspace-note">${this.escapeHtml(state.note || '')}</span>

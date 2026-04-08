@@ -43,6 +43,107 @@ class TestLeaseManager(unittest.TestCase):
         self.assertEqual(result.metrics["success_count"], 0)
         self.assertEqual(result.metrics["failure_count"], 0)
 
+    def test_acquire_by_exit_ip_success(self):
+        proxy_service = MagicMock()
+        proxy_service.get_proxies_by_exit_ip.return_value = [
+            {"port": 10001, "exit_ip": "203.0.113.10"},
+            {"port": 10002, "exit_ip": "203.0.113.10"},
+        ]
+
+        with patch("api.services.lease_service.ProxyService", return_value=proxy_service), \
+             patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]):
+            result = self.manager.acquire_by_exit_ip("workspace_a", "203.0.113.10", ttl=60)
+
+        self.assertTrue(result.success)
+        self.assertIn(result.proxy_port, [10001, 10002])
+        self.assertEqual(result.metrics["usage_count"], 1)
+
+    def test_classify_ports_for_workspace(self):
+        self.manager._active_leases["workspace_b:10002"] = LeaseRecord(
+            lease_id="lease-2",
+            workspace_id="workspace_b",
+            proxy_port=10002,
+            acquired_at=datetime.now(),
+            expires_at=datetime.now() + timedelta(minutes=5),
+        )
+        self.manager._cooldowns["workspace_a:10003"] = CooldownRecord(
+            workspace_id="workspace_a",
+            proxy_port=10003,
+            until=datetime.now() + timedelta(minutes=5),
+            set_at=datetime.now(),
+            source="timed",
+        )
+
+        with patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002, 10003]):
+            classified = self.manager.classify_ports_for_workspace("workspace_a", [10001, 10002, 10003])
+
+        self.assertEqual(classified["available"], {10001})
+        self.assertEqual(classified["occupied"], {10002})
+        self.assertEqual(classified["unavailable"], {10003})
+
+    def test_acquire_by_exit_ip_not_found(self):
+        proxy_service = MagicMock()
+        proxy_service.get_proxies_by_exit_ip.return_value = []
+
+        with patch("api.services.lease_service.ProxyService", return_value=proxy_service):
+            result = self.manager.acquire_by_exit_ip("workspace_a", "203.0.113.10", ttl=60)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "exit_ip_not_found")
+
+    def test_acquire_by_exit_ip_returns_occupied_when_all_matches_actively_leased(self):
+        proxy_service = MagicMock()
+        proxy_service.get_proxies_by_exit_ip.return_value = [
+            {"port": 10001, "exit_ip": "203.0.113.10"},
+        ]
+        self.manager._active_leases["workspace_a:10001"] = LeaseRecord(
+            lease_id="lease-1",
+            workspace_id="workspace_a",
+            proxy_port=10001,
+            acquired_at=datetime.now(),
+            expires_at=datetime.now() + timedelta(minutes=5),
+        )
+
+        with patch("api.services.lease_service.ProxyService", return_value=proxy_service), \
+             patch.object(self.manager, "_get_healthy_ports", return_value=[10001]):
+            result = self.manager.acquire_by_exit_ip("workspace_b", "203.0.113.10", ttl=60)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "exit_ip_occupied")
+
+    def test_acquire_by_exit_ip_returns_unavailable_when_matches_exist_but_not_allocatable(self):
+        proxy_service = MagicMock()
+        proxy_service.get_proxies_by_exit_ip.return_value = [
+            {"port": 10001, "exit_ip": "203.0.113.10"},
+        ]
+
+        with patch("api.services.lease_service.ProxyService", return_value=proxy_service), \
+             patch.object(self.manager, "_get_healthy_ports", return_value=[]):
+            result = self.manager.acquire_by_exit_ip("workspace_a", "203.0.113.10", ttl=60)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "exit_ip_unavailable")
+
+    def test_acquire_by_exit_ip_uses_existing_selection_rule_for_duplicate_matches(self):
+        proxy_service = MagicMock()
+        proxy_service.get_proxies_by_exit_ip.return_value = [
+            {"port": 10002, "exit_ip": "203.0.113.10"},
+            {"port": 10001, "exit_ip": "203.0.113.10"},
+        ]
+
+        with patch("api.services.lease_service.ProxyService", return_value=proxy_service), \
+             patch.object(self.manager, "_get_healthy_ports", return_value=[10001, 10002]), \
+             patch("api.services.lease_service.random.choice", return_value=10002):
+            result = self.manager.acquire_by_exit_ip(
+                "workspace_a",
+                "203.0.113.10",
+                ttl=60,
+                initial_port_ordering="random",
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.proxy_port, 10002)
+
     def test_acquire_no_available_proxy(self):
         with patch.object(self.manager, "_get_healthy_ports", return_value=[]):
             result = self.manager.acquire("workspace_a", ttl=60)
@@ -437,6 +538,7 @@ class TestLeaseManager(unittest.TestCase):
         self.assertIn("workspace_b", stats["workspaces"])
         self.assertTrue(all("success_count" in item for item in stats["proxies_by_usage"]))
         self.assertTrue(any(item["workspace_id"] == "workspace_a" for item in stats["proxies_by_usage"]))
+        self.assertGreaterEqual(len(stats["proxies_by_usage"]), 2)
 
     def test_metrics_persist_round_trip_with_lazy_flush_store(self):
         with TemporaryDirectory() as tmp_dir:

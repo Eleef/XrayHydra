@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 
-from api.routes import subscriptions, proxies, system, nodes, health, lease, custom_groups
+from api.routes import subscriptions, proxies, system, nodes, health, lease, custom_groups, geo
 
 # Create FastAPI app
 app = FastAPI(
@@ -31,6 +31,7 @@ app = FastAPI(
         {"name": "Proxies", "description": "Manage local proxy port mappings and runtime tests."},
         {"name": "Health", "description": "Inspect and control background health monitoring."},
         {"name": "Lease", "description": "Acquire and release proxy leases for client workloads."},
+        {"name": "Geo", "description": "Resolve IP geo metadata and list exit IPs by ISO country code."},
         {"name": "System", "description": "Control Xray lifecycle and query runtime status."},
     ]
 )
@@ -52,6 +53,7 @@ app.include_router(proxies.router)
 app.include_router(system.router)
 app.include_router(health.router)
 app.include_router(lease.router)
+app.include_router(geo.router)
 
 
 # Static files for web frontend

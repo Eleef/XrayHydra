@@ -13,12 +13,17 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # 添加 src 到路径
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+load_dotenv()
 
 from xray_prism.fetcher import fetch_subscription, FetchError
 from xray_prism.parser import parse_subscription
 from xray_prism.generator import ConfigGenerator
+from xray_prism.proxy_runtime import build_proxy_address
 from xray_prism.runner import XrayRunner
 from xray_prism.tester import ProxyTester
 from xray_prism.models import PortMapping
@@ -51,13 +56,13 @@ def save_proxy_list(mappings, output_path: str, proxy_type: str = "http"):
         f.write("#" + "=" * 60 + "\n\n")
         
         for mapping in mappings:
-            proxy_url = f"{proxy_type}://127.0.0.1:{mapping.local_port}"
+            proxy_url = f"{proxy_type}://{build_proxy_address(mapping.local_port)}"
             f.write(f"# {mapping.node.name}\n")
             f.write(f"{proxy_url}\n\n")
         
         f.write("#" + "=" * 60 + "\n")
         f.write("# 格式: 协议://地址:端口\n")
-        f.write("# 使用示例: curl -x http://127.0.0.1:10000 https://httpbin.org/ip\n")
+        f.write(f"# 使用示例: curl -x http://{build_proxy_address(10000)} https://httpbin.org/ip\n")
 
 
 def parse_args():

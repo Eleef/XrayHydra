@@ -49,10 +49,21 @@ Optional `.env`:
 ```env
 HOST=127.0.0.1
 PORT=8000
+PROXY_BIND_HOST=127.0.0.1
+PROXY_ACCESS_HOST=127.0.0.1
 LEASE_API_TOKEN=your_secret_token
 ```
 
 If `LEASE_API_TOKEN` is empty, lease auth is disabled by default.
+
+- `PROXY_BIND_HOST`: actual Xray listen address for local proxy ports. Default is loopback-only.
+- `PROXY_ACCESS_HOST`: host advertised back to API / SDK clients. When unset it follows `PROXY_BIND_HOST`, except `0.0.0.0` falls back to `127.0.0.1`.
+- If the proxy consumer is outside the current network namespace, such as Docker, another machine, or a LAN client, you will usually want:
+
+```env
+PROXY_BIND_HOST=0.0.0.0
+PROXY_ACCESS_HOST=your-server-ip-or-dns
+```
 
 ## Development
 

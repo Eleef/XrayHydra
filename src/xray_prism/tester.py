@@ -12,7 +12,9 @@ from typing import List, Dict, Optional, Callable
 
 import requests
 
+from api.services.geo_service import GeoLookupError, get_geo_service
 from .models import TestResult, PortMapping
+from .proxy_runtime import get_proxy_access_host
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ class ProxyTester:
         timeout: int = 5,
         ip_api: str = DEFAULT_IP_API,
         max_workers: int = 20,
-        listen_address: str = "127.0.0.1"
+        listen_address: Optional[str] = None
     ):
         """
         初始化测试器
@@ -46,7 +48,7 @@ class ProxyTester:
         self.timeout = timeout
         self.ip_api = ip_api
         self.max_workers = max_workers
-        self.listen_address = listen_address
+        self.listen_address = listen_address or get_proxy_access_host()
     
     def test_port(
         self,
@@ -89,6 +91,20 @@ class ProxyTester:
             # 兼容不同 API 的响应格式
             exit_ip = data.get("query") or data.get("origin") or data.get("ip")
             country = data.get("country") or data.get("country_name")
+            country_code = data.get("countryCode") or data.get("country_code")
+
+            if exit_ip and (not country or not country_code):
+                try:
+                    geo_info = get_geo_service().lookup_ip(str(exit_ip))
+                    country = country or geo_info.get("country")
+                    country_code = country_code or geo_info.get("country_code")
+                except (GeoLookupError, ValueError):
+                    pass
+            elif exit_ip and country_code:
+                try:
+                    get_geo_service().remember_region(str(exit_ip), country, country_code)
+                except ValueError:
+                    pass
             
             logger.debug(f"[{port}] {node_name}: {exit_ip} ({latency_ms:.0f}ms)")
             
@@ -98,7 +114,8 @@ class ProxyTester:
                 success=True,
                 exit_ip=exit_ip,
                 latency_ms=round(latency_ms, 2),
-                country=country
+                country=country,
+                country_code=country_code,
             )
             
         except requests.exceptions.Timeout:

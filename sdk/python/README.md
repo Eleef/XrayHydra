@@ -190,6 +190,58 @@ with XrayPrismClient(
     })
 ```
 
+### 7. 查询 IP 所属国家代码
+
+```python
+from xray_prism_sdk import XrayPrismClient
+
+with XrayPrismClient(base_url="http://127.0.0.1:8000") as client:
+    geo = client.lookup_ip_region("8.8.8.8")
+    print(geo["country"])
+    print(geo["country_code"])  # US
+```
+
+### 8. 按国家代码列出当前 workspace 可见出口 IP
+
+```python
+from xray_prism_sdk import XrayPrismClient
+
+with XrayPrismClient(
+    base_url="http://127.0.0.1:8000",
+    token="YOUR_TOKEN",
+) as client:
+    listing = client.list_exit_ips_by_country_code(
+        workspace_id="crawler",
+        country_code="US",
+        available_only=True,
+    )
+    print(listing["items"])
+```
+
+### 9. 先按国家代码列出出口 IP，再按出口 IP 申请租约
+
+```python
+from xray_prism_sdk import XrayPrismClient
+
+with XrayPrismClient(
+    base_url="http://127.0.0.1:8000",
+    token="YOUR_TOKEN",
+) as client:
+    listing = client.list_exit_ips_by_country_code(
+        workspace_id="crawler",
+        country_code="US",
+        available_only=True,
+    )
+    selected_ip = listing["items"][0]["exit_ip"]
+    lease = client.acquire_lease_by_exit_ip({
+        "workspace_id": "crawler",
+        "exit_ip": selected_ip,
+        "ttl": 120,
+    })
+    print(lease["exit_ip"])
+    print(lease["exit_country_code"])
+```
+
 ## 请求模型
 
 SDK 在 `xray_prism_sdk.models` 中生成了请求 `TypedDict`，适合在 IDE 和类型检查器中使用：
@@ -278,6 +330,7 @@ finally:
 ## 已生成方法
 
 - `acquire_lease()`
+- `acquire_lease_by_exit_ip()`
 - `add_proxies()`
 - `apply_timed_lease_cooldown_batch()`
 - `clear_all_proxies()`
@@ -301,8 +354,10 @@ finally:
 - `list_custom_group_nodes()`
 - `list_custom_groups()`
 - `list_proxies()`
+- `list_proxy_exit_ips_by_country_code()`
 - `list_subscription_nodes()`
 - `list_subscriptions()`
+- `lookup_ip_region()`
 - `preview_proxy_exit_ip_duplicates()`
 - `recall_lease_cooldown()`
 - `refresh_subscription()`

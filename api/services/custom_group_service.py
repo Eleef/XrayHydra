@@ -51,6 +51,7 @@ NODE_SNAPSHOT_FIELDS = (
     "latency_ms",
     "exit_ip",
     "exit_country",
+    "exit_country_code",
 )
 
 SEMANTIC_DEDUPE_FIELDS = (
@@ -142,6 +143,7 @@ class CustomGroupService:
         normalized.setdefault("raw_network", None)
         normalized.setdefault("parse_degraded", False)
         normalized.setdefault("parse_degraded_reason", None)
+        normalized.setdefault("exit_country_code", None)
         return normalized
 
     @staticmethod
@@ -191,6 +193,7 @@ class CustomGroupService:
             "latency_ms": None,
             "exit_ip": None,
             "exit_country": None,
+            "exit_country_code": None,
         }
 
     @staticmethod
@@ -394,6 +397,7 @@ class CustomGroupService:
         latency_ms: Optional[int] = None,
         exit_ip: Optional[str] = None,
         exit_country: Optional[str] = None,
+        exit_country_code: Optional[str] = None,
     ) -> None:
         self._load_data()
         if node_id not in self._data.get("nodes", {}):
@@ -403,6 +407,7 @@ class CustomGroupService:
         node_record["latency_ms"] = latency_ms
         node_record["exit_ip"] = exit_ip
         node_record["exit_country"] = exit_country
+        node_record["exit_country_code"] = exit_country_code
         self._save_data()
 
 

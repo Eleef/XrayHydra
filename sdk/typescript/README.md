@@ -37,6 +37,33 @@ await client.set_manual_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 
 await client.recall_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 10022 });
 ```
 
+## 查询 IP 与按国家代码列出出口 IP
+
+```ts
+import { XrayPrismClient } from 'xray-prism-typescript-sdk';
+
+const client = new XrayPrismClient({
+  baseUrl: 'http://127.0.0.1:8000',
+  token: process.env.LEASE_API_TOKEN ?? null,
+});
+
+const geo = await client.lookup_ip_region('8.8.8.8');
+console.log(geo.country, geo.country_code); // United States US
+
+const listing = await client.list_exit_ips_by_country_code('crawler_a', 'US', true);
+console.log(listing.items);
+
+const selectedIp = listing.items[0]?.exit_ip;
+if (selectedIp) {
+  const lease = await client.acquire_lease_by_exit_ip({
+    workspace_id: 'crawler_a',
+    exit_ip: selectedIp,
+    ttl: 120,
+  });
+  console.log(lease.exit_ip, lease.exit_country_code);
+}
+```
+
 ## 说明
 
 - SDK 基于运行中服务的 `/openapi.json` 结构生成，请在接口变更后重新生成。
@@ -46,6 +73,7 @@ await client.recall_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 1002
 ## 已生成方法
 
 - `acquire_lease()`
+- `acquire_lease_by_exit_ip()`
 - `add_proxies()`
 - `apply_timed_lease_cooldown_batch()`
 - `clear_all_proxies()`
@@ -68,9 +96,12 @@ await client.recall_lease_cooldown({ workspace_id: 'crawler_a', proxy_port: 1002
 - `import_custom_group_nodes()`
 - `list_custom_group_nodes()`
 - `list_custom_groups()`
+- `list_exit_ips_by_country_code()`
 - `list_proxies()`
+- `list_proxy_exit_ips_by_country_code()`
 - `list_subscription_nodes()`
 - `list_subscriptions()`
+- `lookup_ip_region()`
 - `preview_proxy_exit_ip_duplicates()`
 - `recall_lease_cooldown()`
 - `refresh_subscription()`

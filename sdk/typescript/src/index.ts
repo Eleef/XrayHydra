@@ -167,6 +167,14 @@ export class XrayPrismClient {
     return this.request('POST', `/api/proxies/${port}/test`, Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null)), undefined, false);
   }
 
+  async list_proxy_exit_ips_by_country_code(country_code: string, query: { workspace_id: string; available_only?: boolean } = {}): Promise<models.CountryExitIpListResponse> {
+    return this.request('GET', `/api/proxies/exit-ips/by-country/${country_code}`, Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null)), undefined, false);
+  }
+
+  async list_exit_ips_by_country_code(workspace_id: string, country_code: string, available_only = false): Promise<models.CountryExitIpListResponse> {
+    return this.list_proxy_exit_ips_by_country_code(country_code, { workspace_id, available_only });
+  }
+
   async get_system_status(): Promise<models.SystemStatusResponse> {
     return this.request('GET', `/api/system/status`, undefined, undefined, false);
   }
@@ -223,6 +231,10 @@ export class XrayPrismClient {
     return this.request('POST', `/api/lease/acquire`, undefined, payload, true);
   }
 
+  async acquire_lease_by_exit_ip(payload: models.LeaseAcquireByExitIpRequest): Promise<models.LeaseAcquireResponse> {
+    return this.request('POST', `/api/lease/acquire/by-exit-ip`, undefined, payload, true);
+  }
+
   async release_lease(payload: models.LeaseReleaseRequest): Promise<models.LeaseReleaseResponse> {
     return this.request('POST', `/api/lease/release`, undefined, payload, true);
   }
@@ -249,6 +261,10 @@ export class XrayPrismClient {
 
   async get_lease_stats(): Promise<models.LeaseStatsResponse> {
     return this.request('GET', `/api/lease/stats`, undefined, undefined, true);
+  }
+
+  async lookup_ip_region(ip: string): Promise<models.IpGeoLookupResponse> {
+    return this.request('GET', `/api/geo/ip/${ip}`, undefined, undefined, false);
   }
 
 }

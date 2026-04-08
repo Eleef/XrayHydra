@@ -149,6 +149,7 @@ class TestResult:
     exit_ip: Optional[str] = None
     latency_ms: Optional[float] = None
     country: Optional[str] = None
+    country_code: Optional[str] = None
     
     # 失败时填充
     error: Optional[str] = None

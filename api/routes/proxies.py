@@ -1,10 +1,12 @@
 """
 Proxy management API routes.
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from typing import List
 
 from api.schemas.models import (
+    CountryExitIpItem,
+    CountryExitIpListResponse,
     ProxyAddRequest,
     ProxyResponse,
     ProxyListResponse,
@@ -18,6 +20,7 @@ from api.schemas.models import (
     SuccessResponse,
     ErrorResponse,
 )
+from api.services.lease_service import get_lease_manager
 from api.services.proxy_service import get_proxy_service
 
 router = APIRouter(prefix="/api/proxies", tags=["Proxies"])
@@ -44,6 +47,8 @@ async def get_proxies():
             "test_status": p.get("test_status", "pending"),
             "latency_ms": p.get("latency_ms"),
             "exit_ip": p.get("exit_ip"),
+            "exit_country": p.get("exit_country"),
+            "exit_country_code": p.get("exit_country_code"),
             "pool_status": p.get("pool_status", "active"),
             "disabled_reason": p.get("disabled_reason"),
             **service.get_proxy_runtime_metadata(p, runtime_ports=runtime_ports, xray_running=xray_running),
@@ -83,6 +88,10 @@ async def add_proxies(data: ProxyAddRequest):
             "address": p["address"],
             "server_port": p["server_port"],
             "test_status": p.get("test_status", "pending"),
+            "latency_ms": p.get("latency_ms"),
+            "exit_ip": p.get("exit_ip"),
+            "exit_country": p.get("exit_country"),
+            "exit_country_code": p.get("exit_country_code"),
             "pool_status": p.get("pool_status", "active"),
             "disabled_reason": p.get("disabled_reason"),
             **service.get_proxy_runtime_metadata(p, runtime_ports=runtime_ports, xray_running=xray_running),
@@ -190,6 +199,8 @@ async def test_all_proxies(timeout: int = 5, workers: int = 20, attempts: int = 
                 status=r["status"],
                 latency_ms=r.get("latency_ms"),
                 exit_ip=r.get("exit_ip"),
+                exit_country=r.get("exit_country"),
+                exit_country_code=r.get("exit_country_code"),
                 error=r.get("error")
             ) for r in result["results"]],
             success_count=result["success_count"],
@@ -231,6 +242,8 @@ async def test_single_proxy(port: int, timeout: int = 5):
             status=result["status"],
             latency_ms=result.get("latency_ms"),
             exit_ip=result.get("exit_ip"),
+            exit_country=result.get("exit_country"),
+            exit_country_code=result.get("exit_country_code"),
             error=result.get("error")
         )
     except (RuntimeError, ValueError) as e:
@@ -238,3 +251,68 @@ async def test_single_proxy(port: int, timeout: int = 5):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
+
+@router.get(
+    "/exit-ips/by-country/{country_code}",
+    response_model=CountryExitIpListResponse,
+    responses={400: {"model": ErrorResponse, "description": "Invalid country code or workspace"}},
+    operation_id="listProxyExitIpsByCountryCode",
+)
+async def list_proxy_exit_ips_by_country_code(
+    country_code: str,
+    workspace_id: str = Query(..., min_length=1, description="Workspace identifier used to classify lease availability"),
+    available_only: bool = Query(False, description="Return only exit IPs with at least one available proxy"),
+):
+    """List unique tested exit IPs in the active proxy pool for one ISO country code and workspace."""
+    service = get_proxy_service()
+    manager = get_lease_manager()
+
+    normalized_code = str(country_code or "").strip().upper()
+    if len(normalized_code) != 2 or not normalized_code.isalpha():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="country_code must be a 2-letter ISO code")
+
+    proxies = service.get_proxies_by_country_code(normalized_code)
+    grouped: dict[str, dict] = {}
+    for proxy in proxies:
+        exit_ip = str(proxy.get("exit_ip") or "").strip()
+        if not exit_ip:
+            continue
+        item = grouped.setdefault(
+            exit_ip,
+            {
+                "exit_ip": exit_ip,
+                "country": proxy.get("exit_country"),
+                "country_code": normalized_code,
+                "ports": [],
+            },
+        )
+        item["ports"].append(int(proxy["port"]))
+
+    items: list[CountryExitIpItem] = []
+    for exit_ip, entry in sorted(grouped.items()):
+        classified = manager.classify_ports_for_workspace(workspace_id, entry["ports"])
+        available_count = len(classified["available"])
+        occupied_count = len(classified["occupied"])
+        unavailable_count = len(classified["unavailable"])
+        if available_only and available_count == 0:
+            continue
+        items.append(
+            CountryExitIpItem(
+                exit_ip=exit_ip,
+                country=entry["country"],
+                country_code=normalized_code,
+                proxy_count=len(entry["ports"]),
+                available_proxy_count=available_count,
+                occupied_proxy_count=occupied_count,
+                unavailable_proxy_count=unavailable_count,
+            )
+        )
+
+    return CountryExitIpListResponse(
+        workspace_id=workspace_id,
+        country_code=normalized_code,
+        available_only=available_only,
+        items=items,
+        total=len(items),
+    )

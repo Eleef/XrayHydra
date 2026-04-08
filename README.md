@@ -51,10 +51,21 @@ API Docs：`http://127.0.0.1:8000/docs`
 ```env
 HOST=127.0.0.1
 PORT=8000
+PROXY_BIND_HOST=127.0.0.1
+PROXY_ACCESS_HOST=127.0.0.1
 LEASE_API_TOKEN=your_secret_token
 ```
 
 `LEASE_API_TOKEN` 为空时，租约 API 默认不启用认证。
+
+- `PROXY_BIND_HOST`：Xray 代理端口实际监听地址，默认仅监听本机回环。
+- `PROXY_ACCESS_HOST`：API / SDK 返回给客户端的代理地址主机名；未设置时默认跟随 `PROXY_BIND_HOST`，但当 `PROXY_BIND_HOST=0.0.0.0` 时会回退为 `127.0.0.1`。
+- 如果调用方不在当前机器的同一网络命名空间（例如 Docker 容器、另一台机器或局域网客户端），通常需要设置：
+
+```env
+PROXY_BIND_HOST=0.0.0.0
+PROXY_ACCESS_HOST=你的服务器IP或域名
+```
 
 ## 开发与测试
 

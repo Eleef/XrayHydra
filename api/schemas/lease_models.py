@@ -52,6 +52,41 @@ class LeaseAcquireRequest(BaseModel):
     )
 
 
+class LeaseAcquireByExitIpRequest(BaseModel):
+    """Request model for acquiring a proxy lease by tested exit IP."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "workspace_id": "amazon_crawler",
+                "exit_ip": "203.0.113.10",
+                "ttl": 60,
+                "initial_port_ordering": "random",
+            }
+        }
+    )
+    workspace_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Workspace identifier for isolation (e.g., 'amazon_crawler')"
+    )
+    exit_ip: str = Field(
+        ...,
+        min_length=1,
+        description="Desired tested exit IP to lease from the proxy pool"
+    )
+    ttl: int = Field(
+        default=30,
+        ge=5,
+        le=3600,
+        description="Time-to-live in seconds (default: 30s, max: 1h)"
+    )
+    initial_port_ordering: LeaseInitialPortOrdering = Field(
+        default=LeaseInitialPortOrdering.RANDOM,
+        description="Tie-break strategy used only when candidate ports have no prior usage history"
+    )
+
+
 class LeaseReleaseRequest(BaseModel):
     """Request model for releasing a proxy lease."""
     model_config = ConfigDict(
@@ -204,6 +239,7 @@ class LeaseAcquireResponse(BaseModel):
                 "success": True,
                 "lease_id": "550e8400-e29b-41d4-a716-446655440000",
                 "proxy_address": "127.0.0.1:10001",
+                "exit_ip": "203.0.113.10",
                 "proxy_scheme": "http",
                 "supported_proxy_protocols": ["http", "socks5"],
                 "http_proxy_url": "http://127.0.0.1:10001",
@@ -222,6 +258,9 @@ class LeaseAcquireResponse(BaseModel):
     success: bool = True
     lease_id: str = Field(..., description="Unique lease identifier")
     proxy_address: str = Field(..., description="Proxy address (e.g., '127.0.0.1:10001')")
+    exit_ip: Optional[str] = Field(default=None, description="Tested exit IP currently associated with the selected proxy")
+    exit_country: Optional[str] = Field(default=None, description="Resolved exit country name currently associated with the selected proxy")
+    exit_country_code: Optional[str] = Field(default=None, description="Resolved exit country code (ISO 3166-1 alpha-2) currently associated with the selected proxy")
     proxy_scheme: str = Field(..., description="Default proxy URL scheme for backward-compatible clients")
     supported_proxy_protocols: List[str] = Field(..., description="Client protocols supported by the same local port")
     http_proxy_url: str = Field(..., description="HTTP proxy URL for the leased local port")
@@ -334,6 +373,9 @@ class ActiveLeaseInfo(BaseModel):
     proxy_port: int
     node_name: Optional[str] = None
     proxy_address: str
+    exit_ip: Optional[str] = None
+    exit_country: Optional[str] = None
+    exit_country_code: Optional[str] = None
     proxy_scheme: str
     supported_proxy_protocols: List[str]
     http_proxy_url: str

@@ -15,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.schemas.lease_models import (
     LeaseAcquireRequest,
+    LeaseAcquireByExitIpRequest,
     LeaseAcquireResponse,
     LeaseReleaseRequest,
     LeaseReleaseResponse,
@@ -97,6 +98,23 @@ def build_lease_metrics(metrics: Optional[dict]) -> LeaseProxyMetrics:
     )
 
 
+def get_proxy_geo(port: Optional[int]) -> dict[str, Optional[str]]:
+    """Resolve tested exit geo fields for a local proxy port."""
+    if port is None:
+        return {"exit_ip": None, "exit_country": None, "exit_country_code": None}
+    proxy = ProxyService().get_proxy_by_port(int(port))
+    if not proxy:
+        return {"exit_ip": None, "exit_country": None, "exit_country_code": None}
+    exit_ip = str(proxy.get("exit_ip") or "").strip() or None
+    exit_country = str(proxy.get("exit_country") or "").strip() or None
+    exit_country_code = str(proxy.get("exit_country_code") or "").strip().upper() or None
+    return {
+        "exit_ip": exit_ip,
+        "exit_country": exit_country,
+        "exit_country_code": exit_country_code,
+    }
+
+
 @router.post(
     "/acquire",
     response_model=LeaseAcquireResponse,
@@ -139,6 +157,56 @@ async def acquire_lease(request: LeaseAcquireRequest):
         lease_id=result.lease_id,
         expires_at=result.expires_at,
         metrics=build_lease_metrics(result.metrics),
+        **get_proxy_geo(result.proxy_port),
+        **build_proxy_access_fields(result.proxy_port)
+    )
+
+
+@router.post(
+    "/acquire/by-exit-ip",
+    response_model=LeaseAcquireResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        503: {"model": LeaseErrorResponse, "description": "Target exit IP is unavailable"}
+    },
+    operation_id="acquireLeaseByExitIp",
+    summary="按出口 IP 申请代理租约",
+    description="""
+    为指定 workspace 按出口 IP 申请一个代理租约。
+
+    - **workspace_id**: 业务隔离标识（不同 workspace 可使用同一代理）
+    - **exit_ip**: 希望命中的测试出口 IP
+    - **ttl**: 租约有效时间（秒），超时自动释放
+
+    如果同一出口 IP 对应多个代理，会按当前可用候选集中的现有选择规则自动挑选一个。
+    """
+)
+async def acquire_lease_by_exit_ip(request: LeaseAcquireByExitIpRequest):
+    """Acquire a proxy lease constrained to a tested exit IP."""
+    manager = get_lease_manager()
+    result = manager.acquire_by_exit_ip(
+        workspace_id=request.workspace_id,
+        exit_ip=request.exit_ip,
+        ttl=request.ttl,
+        initial_port_ordering=request.initial_port_ordering.value,
+    )
+
+    if not result.success:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": result.error,
+                "message": result.message
+            }
+        )
+
+    return LeaseAcquireResponse(
+        success=True,
+        lease_id=result.lease_id,
+        expires_at=result.expires_at,
+        metrics=build_lease_metrics(result.metrics),
+        **get_proxy_geo(result.proxy_port),
         **build_proxy_access_fields(result.proxy_port)
     )
 
@@ -326,6 +394,7 @@ async def get_lease_status(
             acquired_at=lease["acquired_at"],
             expires_at=lease["expires_at"],
             metrics=build_lease_metrics(lease.get("metrics")),
+            **get_proxy_geo(lease["proxy_port"]),
             **build_proxy_access_fields(lease["proxy_port"])
         )
         for lease in status["active_leases"]

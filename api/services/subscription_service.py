@@ -69,6 +69,7 @@ class SubscriptionService:
         normalized.setdefault("raw_network", None)
         normalized.setdefault("parse_degraded", False)
         normalized.setdefault("parse_degraded_reason", None)
+        normalized.setdefault("exit_country_code", None)
         return normalized
     
     def get_all_subscriptions(self) -> List[Dict]:
@@ -216,7 +217,8 @@ class SubscriptionService:
                 "test_status": "pending",
                 "latency_ms": None,
                 "exit_ip": None,
-                "exit_country": None
+                "exit_country": None,
+                "exit_country_code": None,
             }
 
         return nodes_data
@@ -271,7 +273,8 @@ class SubscriptionService:
     def update_node_test_result(self, node_id: str, status: str, 
                                  latency_ms: Optional[int] = None,
                                  exit_ip: Optional[str] = None,
-                                 exit_country: Optional[str] = None):
+                                 exit_country: Optional[str] = None,
+                                 exit_country_code: Optional[str] = None):
         """Update a node's test result."""
         self._load_data()
         
@@ -280,6 +283,7 @@ class SubscriptionService:
             self._data["nodes"][node_id]["latency_ms"] = latency_ms
             self._data["nodes"][node_id]["exit_ip"] = exit_ip
             self._data["nodes"][node_id]["exit_country"] = exit_country
+            self._data["nodes"][node_id]["exit_country_code"] = exit_country_code
             self._save_data()
 
 

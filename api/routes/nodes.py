@@ -7,6 +7,7 @@ from api.schemas.models import (
     NodeBatchTestResponse,
     NodeTestJobResponse,
     NodeTestRequest,
+    NodeTestResult,
     NodeResponse,
     ErrorResponse,
 )

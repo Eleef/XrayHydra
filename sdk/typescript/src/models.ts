@@ -7,6 +7,9 @@ export interface ActiveLeaseInfo {
   proxy_port: number;
   node_name?: string | unknown;
   proxy_address: string;
+  exit_ip?: string | unknown;
+  exit_country?: string | unknown;
+  exit_country_code?: string | unknown;
   proxy_scheme: string;
   supported_proxy_protocols: Array<string>;
   http_proxy_url: string;
@@ -25,6 +28,24 @@ export interface CooldownInfo {
   set_at: string;
   source: "manual" | "timed";
   metrics: LeaseProxyMetrics;
+}
+
+export interface CountryExitIpItem {
+  exit_ip: string;
+  country?: string | unknown;
+  country_code: string;
+  proxy_count: number;
+  available_proxy_count: number;
+  occupied_proxy_count: number;
+  unavailable_proxy_count: number;
+}
+
+export interface CountryExitIpListResponse {
+  workspace_id: string;
+  country_code: string;
+  available_only?: boolean;
+  items: Array<CountryExitIpItem>;
+  total: number;
 }
 
 export interface CustomGroupCopyNodesRequest {
@@ -100,6 +121,19 @@ export interface HealthStatusListResponse {
   disabled_count: number;
 }
 
+export interface IpGeoLookupResponse {
+  ip: string;
+  country: string;
+  country_code: string;
+}
+
+export interface LeaseAcquireByExitIpRequest {
+  workspace_id: string;
+  exit_ip: string;
+  ttl?: number;
+  initial_port_ordering?: LeaseInitialPortOrdering;
+}
+
 export interface LeaseAcquireRequest {
   workspace_id: string;
   ttl?: number;
@@ -110,6 +144,9 @@ export interface LeaseAcquireResponse {
   success?: boolean;
   lease_id: string;
   proxy_address: string;
+  exit_ip?: string | unknown;
+  exit_country?: string | unknown;
+  exit_country_code?: string | unknown;
   proxy_scheme: string;
   supported_proxy_protocols: Array<string>;
   http_proxy_url: string;
@@ -221,6 +258,7 @@ export interface NodeResponse {
   latency_ms?: number | unknown;
   exit_ip?: string | unknown;
   exit_country?: string | unknown;
+  exit_country_code?: string | unknown;
   runtime_supported?: boolean;
   runtime_support_reason?: string | unknown;
   in_proxy_pool?: boolean;
@@ -262,6 +300,7 @@ export interface NodeTestResult {
   latency_ms?: number | unknown;
   exit_ip?: string | unknown;
   exit_country?: string | unknown;
+  exit_country_code?: string | unknown;
   error?: string | unknown;
   test_profile?: string | unknown;
   tested_target?: string | unknown;
@@ -323,6 +362,8 @@ export interface ProxyHealthResponse {
   last_check?: string | unknown;
   last_success?: string | unknown;
   last_latency_ms?: number | unknown;
+  last_error_category?: string | unknown;
+  last_error_message?: string | unknown;
 }
 
 export interface ProxyListResponse {
@@ -349,8 +390,12 @@ export interface ProxyResponse {
   test_status?: TestStatus;
   latency_ms?: number | unknown;
   exit_ip?: string | unknown;
+  exit_country?: string | unknown;
+  exit_country_code?: string | unknown;
   pool_status?: ProxyPoolStatus;
   disabled_reason?: string | unknown;
+  runtime_loaded?: boolean;
+  runtime_load_reason?: string | unknown;
 }
 
 export interface ProxyTestAllResponse {

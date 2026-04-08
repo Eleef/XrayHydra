@@ -39,6 +39,9 @@ class TestOpenAPIContract(unittest.TestCase):
 
         self.assertEqual(len(operation_ids), len(set(operation_ids)))
         self.assertIn("acquireLease", operation_ids)
+        self.assertIn("acquireLeaseByExitIp", operation_ids)
+        self.assertIn("lookupIpRegion", operation_ids)
+        self.assertIn("listProxyExitIpsByCountryCode", operation_ids)
         self.assertIn("createSubscription", operation_ids)
         self.assertIn("getSystemStatus", operation_ids)
         self.assertIn("previewProxyExitIpDuplicates", operation_ids)
@@ -75,10 +78,13 @@ class TestOpenAPIContract(unittest.TestCase):
         spec = response.json()
         schemas = spec["components"]["schemas"]
         self.assertIn("example", schemas["LeaseAcquireRequest"])
+        self.assertIn("example", schemas["LeaseAcquireByExitIpRequest"])
         self.assertIn("example", schemas["SubscriptionCreate"])
         self.assertIn("example", schemas["ProxyAddRequest"])
         acquire_request_props = schemas["LeaseAcquireRequest"]["properties"]
+        acquire_by_exit_ip_request_props = schemas["LeaseAcquireByExitIpRequest"]["properties"]
         self.assertIn("initial_port_ordering", acquire_request_props)
+        self.assertIn("exit_ip", acquire_by_exit_ip_request_props)
         release_request_props = schemas["LeaseReleaseRequest"]["properties"]
         cooldown_request_props = schemas["LeaseCooldownRequest"]["properties"]
         batch_cooldown_request_props = schemas["LeaseTimedCooldownBatchRequest"]["properties"]
@@ -106,8 +112,13 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("disabled_reason", proxy_props)
         self.assertIn("runtime_loaded", proxy_props)
         self.assertIn("runtime_load_reason", proxy_props)
+        self.assertIn("exit_country", proxy_props)
+        self.assertIn("exit_country_code", proxy_props)
 
         lease_props = schemas["LeaseAcquireResponse"]["properties"]
+        self.assertIn("exit_ip", lease_props)
+        self.assertIn("exit_country", lease_props)
+        self.assertIn("exit_country_code", lease_props)
         self.assertIn("proxy_scheme", lease_props)
         self.assertIn("http_proxy_url", lease_props)
         self.assertIn("socks5_proxy_url", lease_props)
@@ -126,6 +137,9 @@ class TestOpenAPIContract(unittest.TestCase):
 
         active_lease_props = schemas["ActiveLeaseInfo"]["properties"]
         self.assertIn("node_name", active_lease_props)
+        self.assertIn("exit_ip", active_lease_props)
+        self.assertIn("exit_country", active_lease_props)
+        self.assertIn("exit_country_code", active_lease_props)
         self.assertIn("metrics", active_lease_props)
 
         metrics_props = schemas["LeaseProxyMetrics"]["properties"]
@@ -140,6 +154,9 @@ class TestOpenAPIContract(unittest.TestCase):
 
         self.assertIn("/api/proxies/duplicates/exit-ip", spec["paths"])
         self.assertIn("/api/proxies/dedupe/exit-ip", spec["paths"])
+        self.assertIn("/api/proxies/exit-ips/by-country/{country_code}", spec["paths"])
+        self.assertIn("/api/geo/ip/{ip}", spec["paths"])
+        self.assertIn("/api/lease/acquire/by-exit-ip", spec["paths"])
         dedupe_request_ref = spec["paths"]["/api/proxies/dedupe/exit-ip"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
         dedupe_request_name = dedupe_request_ref.rsplit("/", 1)[-1]
         dedupe_request_props = schemas[dedupe_request_name]["properties"]
@@ -187,6 +204,7 @@ class TestOpenAPIContract(unittest.TestCase):
         self.assertIn("subscription_id", node_props)
         self.assertIn("runtime_supported", node_props)
         self.assertIn("runtime_support_reason", node_props)
+        self.assertIn("exit_country_code", node_props)
         self.assertIn("group_id", node_props)
         self.assertIn("group_type", node_props)
         self.assertIn("subscription_id", node_props)
@@ -222,6 +240,7 @@ class TestOpenAPIContract(unittest.TestCase):
         result_name = result_ref.rsplit("/", 1)[-1]
         result_props = schemas[result_name]["properties"]
         self.assertIn("status", result_props)
+        self.assertIn("exit_country_code", result_props)
         test_status_name = result_props["status"]["$ref"].rsplit("/", 1)[-1]
         test_status_enum = schemas[test_status_name]["enum"]
         self.assertIn("success", test_status_enum)

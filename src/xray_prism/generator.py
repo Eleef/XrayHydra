@@ -17,6 +17,7 @@ from .models import (
     PortMapping,
 )
 from .capabilities import evaluate_node_runtime
+from .proxy_runtime import get_proxy_bind_host
 from .runtime_adapters.xray import XrayAdapterRegistry
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class ConfigGenerator:
     def __init__(
         self,
         start_port: int = 10000,
-        listen_address: str = "127.0.0.1",
+        listen_address: Optional[str] = None,
         inbound_protocol: str = "http"  # 或 "socks"
     ):
         """
@@ -40,7 +41,7 @@ class ConfigGenerator:
             inbound_protocol: 入站协议类型（http 或 socks）
         """
         self.start_port = start_port
-        self.listen_address = listen_address
+        self.listen_address = listen_address or get_proxy_bind_host()
         self.inbound_protocol = inbound_protocol
         self._adapter_registry = XrayAdapterRegistry()
     

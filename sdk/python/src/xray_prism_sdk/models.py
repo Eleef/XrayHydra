@@ -12,6 +12,9 @@ class ActiveLeaseInfo(TypedDict):
     proxy_port: int
     node_name: NotRequired[str | None]
     proxy_address: str
+    exit_ip: NotRequired[str | None]
+    exit_country: NotRequired[str | None]
+    exit_country_code: NotRequired[str | None]
     proxy_scheme: str
     supported_proxy_protocols: list[str]
     http_proxy_url: str
@@ -30,6 +33,24 @@ class CooldownInfo(TypedDict):
     set_at: str
     source: Literal['manual', 'timed']
     metrics: LeaseProxyMetrics
+
+class CountryExitIpItem(TypedDict):
+    """One unique tested exit IP grouped by ISO country code for one workspace."""
+    exit_ip: str
+    country: NotRequired[str | None]
+    country_code: str
+    proxy_count: int
+    available_proxy_count: int
+    occupied_proxy_count: int
+    unavailable_proxy_count: int
+
+class CountryExitIpListResponse(TypedDict):
+    """Unique exit IPs for one workspace filtered by ISO country code."""
+    workspace_id: str
+    country_code: str
+    available_only: NotRequired[bool]
+    items: list[CountryExitIpItem]
+    total: int
 
 class CustomGroupCopyNodesRequest(TypedDict):
     """Request model for copying existing nodes into a custom group."""
@@ -104,6 +125,19 @@ class HealthStatusListResponse(TypedDict):
     degraded_count: int
     disabled_count: int
 
+class IpGeoLookupResponse(TypedDict):
+    """Geo lookup result for one concrete IP address."""
+    ip: str
+    country: str
+    country_code: str
+
+class LeaseAcquireByExitIpRequest(TypedDict):
+    """Request model for acquiring a proxy lease by tested exit IP."""
+    workspace_id: str
+    exit_ip: str
+    ttl: NotRequired[int]
+    initial_port_ordering: NotRequired[LeaseInitialPortOrdering]
+
 class LeaseAcquireRequest(TypedDict):
     """Request model for acquiring a proxy lease."""
     workspace_id: str
@@ -115,6 +149,9 @@ class LeaseAcquireResponse(TypedDict):
     success: NotRequired[bool]
     lease_id: str
     proxy_address: str
+    exit_ip: NotRequired[str | None]
+    exit_country: NotRequired[str | None]
+    exit_country_code: NotRequired[str | None]
     proxy_scheme: str
     supported_proxy_protocols: list[str]
     http_proxy_url: str
@@ -226,6 +263,7 @@ class NodeResponse(TypedDict):
     latency_ms: NotRequired[int | None]
     exit_ip: NotRequired[str | None]
     exit_country: NotRequired[str | None]
+    exit_country_code: NotRequired[str | None]
     runtime_supported: NotRequired[bool]
     runtime_support_reason: NotRequired[str | None]
     in_proxy_pool: NotRequired[bool]
@@ -267,6 +305,7 @@ class NodeTestResult(TypedDict):
     latency_ms: NotRequired[int | None]
     exit_ip: NotRequired[str | None]
     exit_country: NotRequired[str | None]
+    exit_country_code: NotRequired[str | None]
     error: NotRequired[str | None]
     test_profile: NotRequired[str | None]
     tested_target: NotRequired[str | None]
@@ -328,6 +367,8 @@ class ProxyHealthResponse(TypedDict):
     last_check: NotRequired[str | None]
     last_success: NotRequired[str | None]
     last_latency_ms: NotRequired[float | None]
+    last_error_category: NotRequired[str | None]
+    last_error_message: NotRequired[str | None]
 
 class ProxyListResponse(TypedDict):
     """Response model for list of active proxies."""
@@ -354,8 +395,12 @@ class ProxyResponse(TypedDict):
     test_status: NotRequired[TestStatus]
     latency_ms: NotRequired[int | None]
     exit_ip: NotRequired[str | None]
+    exit_country: NotRequired[str | None]
+    exit_country_code: NotRequired[str | None]
     pool_status: NotRequired[ProxyPoolStatus]
     disabled_reason: NotRequired[str | None]
+    runtime_loaded: NotRequired[bool]
+    runtime_load_reason: NotRequired[str | None]
 
 class ProxyTestAllResponse(TypedDict):
     """Response model for testing all proxies."""

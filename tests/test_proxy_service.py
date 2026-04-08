@@ -192,7 +192,79 @@ class TestProxyService(unittest.TestCase):
         config = json.loads(self.config_file.read_text(encoding="utf-8"))
         self.assertEqual(config["inbounds"][0]["protocol"], "socks")
         self.assertEqual(config["inbounds"][0]["port"], 10022)
+        self.assertEqual(config["inbounds"][0]["listen"], "127.0.0.1")
         self.assertTrue(config["inbounds"][0]["settings"]["udp"])
+
+    def test_regenerate_config_uses_configured_proxy_bind_host(self):
+        self._write_proxies([
+            {"port": 10022, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443},
+        ])
+        self.service._load_data()
+
+        mock_subscription_service = MagicMock()
+        mock_subscription_service.get_node.return_value = {
+            "id": "node_1",
+            "name": "Node 1",
+            "protocol": "trojan",
+            "address": "demo.example.com",
+            "port": 443,
+            "password": "secret",
+            "network": "tcp",
+            "tls": True,
+        }
+
+        with patch.dict("os.environ", {"PROXY_BIND_HOST": "0.0.0.0"}, clear=False), \
+             patch("api.services.proxy_service.get_subscription_service", return_value=mock_subscription_service):
+            config_path = self.service._regenerate_config()
+
+        self.assertEqual(config_path, str(self.config_file))
+        config = json.loads(self.config_file.read_text(encoding="utf-8"))
+        self.assertEqual(config["inbounds"][0]["listen"], "0.0.0.0")
+
+    def test_build_proxy_access_fields_uses_configured_access_host(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "PROXY_BIND_HOST": "0.0.0.0",
+                "PROXY_ACCESS_HOST": "192.168.50.10",
+            },
+            clear=False,
+        ):
+            fields = self.service.build_proxy_access_fields(10022)
+
+        self.assertEqual(fields["proxy_address"], "192.168.50.10:10022")
+        self.assertEqual(fields["http_proxy_url"], "http://192.168.50.10:10022")
+        self.assertEqual(fields["socks5_proxy_url"], "socks5://192.168.50.10:10022")
+
+    def test_get_proxies_by_country_code_filters_exact_match(self):
+        self._write_proxies([
+            {
+                "port": 10000,
+                "node_id": "node_1",
+                "node_name": "Node 1",
+                "protocol": "trojan",
+                "address": "a",
+                "server_port": 443,
+                "exit_ip": "203.0.113.10",
+                "exit_country": "United States",
+                "exit_country_code": "US",
+            },
+            {
+                "port": 10001,
+                "node_id": "node_2",
+                "node_name": "Node 2",
+                "protocol": "trojan",
+                "address": "b",
+                "server_port": 443,
+                "exit_ip": "203.0.113.20",
+                "exit_country": "Japan",
+                "exit_country_code": "JP",
+            },
+        ])
+        self.service._load_data()
+
+        us_proxies = self.service.get_proxies_by_country_code("us")
+        self.assertEqual([item["port"] for item in us_proxies], [10000])
 
     def test_sync_health_runtime_state_runs_immediate_probe_after_start(self):
         self._write_proxies([

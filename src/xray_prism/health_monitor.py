@@ -15,6 +15,7 @@ from typing import List, Dict, Optional, Callable, Tuple
 import requests
 
 from .models import ProxyHealthState, HealthStatus
+from .proxy_runtime import get_proxy_access_host
 
 logger = logging.getLogger(__name__)
 FAILURE_THRESHOLD = 3
@@ -51,7 +52,7 @@ class HealthMonitor:
         timeout: int = DEFAULT_CONFIG["test_timeout_seconds"],
         max_workers: int = DEFAULT_CONFIG["max_workers"],
         penalty_levels: List[int] = None,
-        listen_address: str = "127.0.0.1",
+        listen_address: Optional[str] = None,
     ):
         """
         初始化健康监测器
@@ -66,7 +67,7 @@ class HealthMonitor:
         self.test_target = test_target
         self.timeout = timeout
         self.max_workers = max_workers
-        self.listen_address = listen_address
+        self.listen_address = listen_address or get_proxy_access_host()
         
         # 默认罚时等级（分钟）
         if penalty_levels is None:

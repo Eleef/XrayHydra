@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from api.services.health_service import get_health_service
+from api.services.proxy_service import ProxyService
+from src.xray_prism.proxy_runtime import build_proxy_address
 
 # Configurable logging - disabled by default
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ class LeaseRecord:
             "lease_id": self.lease_id,
             "workspace_id": self.workspace_id,
             "proxy_port": self.proxy_port,
-            "proxy_address": f"127.0.0.1:{self.proxy_port}",
+            "proxy_address": build_proxy_address(self.proxy_port),
             "acquired_at": self.acquired_at.isoformat(),
             "expires_at": self.expires_at.isoformat()
         }
@@ -353,6 +355,26 @@ class LeaseManager:
             lease.proxy_port == proxy_port and not lease.is_expired()
             for lease in self._active_leases.values()
         )
+
+    def classify_ports_for_workspace(self, workspace_id: str, proxy_ports: List[int]) -> Dict[str, Set[int]]:
+        """Classify ports for one workspace into available/occupied/unavailable sets."""
+        with self._lock:
+            self._cleanup_expired_leases()
+            self._cleanup_expired_cooldowns()
+
+            requested_ports = {int(port) for port in proxy_ports}
+            occupied = {int(port) for port in requested_ports if self._has_active_lease_for_port(int(port))}
+            available = {
+                int(port)
+                for port in self._get_available_ports(workspace_id)
+                if int(port) in requested_ports and int(port) not in occupied
+            }
+            unavailable = requested_ports - available - occupied
+            return {
+                "available": available,
+                "occupied": occupied,
+                "unavailable": unavailable,
+            }
     
     def _cleanup_expired_leases(self) -> int:
         """Remove expired leases. Returns count of removed leases."""
@@ -399,6 +421,58 @@ class LeaseManager:
         if states and all(state.get("status") == "disabled" for state in states):
             return "当前没有可分配代理：所有代理均处于健康禁用状态"
         return "所有代理均被占用或冷却中"
+
+    def _acquire_from_ports(
+        self,
+        workspace_id: str,
+        candidate_ports: List[int],
+        ttl: int,
+        *,
+        initial_port_ordering: str,
+        no_available_error: str,
+        no_available_message: str,
+    ) -> LeaseResult:
+        if not candidate_ports:
+            return LeaseResult(
+                success=False,
+                error=no_available_error,
+                message=no_available_message,
+            )
+
+        port = self._select_lru_port(
+            workspace_id,
+            candidate_ports,
+            initial_port_ordering=initial_port_ordering,
+        )
+        if port is None:
+            return LeaseResult(
+                success=False,
+                error=no_available_error,
+                message="无法选择代理端口",
+            )
+
+        now = datetime.now()
+        lease_id = str(uuid.uuid4())
+        expires_at = now + timedelta(seconds=ttl)
+        lease = LeaseRecord(
+            lease_id=lease_id,
+            workspace_id=workspace_id,
+            proxy_port=port,
+            acquired_at=now,
+            expires_at=expires_at,
+        )
+        key = self._make_key(workspace_id, port)
+        self._active_leases[key] = lease
+        metrics = self._update_usage(workspace_id, port)
+
+        logger.info("Lease acquired: %s -> port %s, ttl=%ss", workspace_id, port, ttl)
+        return LeaseResult(
+            success=True,
+            lease_id=lease_id,
+            proxy_port=port,
+            expires_at=expires_at,
+            metrics=metrics,
+        )
     
     def _get_available_ports(self, workspace_id: str) -> List[int]:
         """
@@ -497,45 +571,73 @@ class LeaseManager:
             available_ports = self._get_available_ports(workspace_id)
             if not available_ports:
                 logger.warning("No available proxy for workspace: %s", workspace_id)
-                return LeaseResult(
-                    success=False,
-                    error="no_available_proxy",
-                    message=self._build_no_available_message(),
-                )
-
-            port = self._select_lru_port(
+            return self._acquire_from_ports(
                 workspace_id,
                 available_ports,
+                ttl,
                 initial_port_ordering=initial_port_ordering,
+                no_available_error="no_available_proxy",
+                no_available_message=self._build_no_available_message(),
             )
-            if port is None:
+
+    def acquire_by_exit_ip(
+        self,
+        workspace_id: str,
+        exit_ip: str,
+        ttl: int = 30,
+        initial_port_ordering: str = INITIAL_PORT_ORDER_RANDOM,
+    ) -> LeaseResult:
+        """Acquire a proxy lease constrained to proxies whose tested exit IP matches the requested value."""
+        normalized_exit_ip = str(exit_ip or "").strip()
+        if not normalized_exit_ip:
+            return LeaseResult(
+                success=False,
+                error="exit_ip_not_found",
+                message="目标出口 IP 不能为空",
+            )
+
+        with self._lock:
+            self._cleanup_expired_leases()
+            self._cleanup_expired_cooldowns()
+
+            proxy_service = ProxyService()
+            matching_proxies = proxy_service.get_proxies_by_exit_ip(normalized_exit_ip, include_disabled=False)
+            if not matching_proxies:
                 return LeaseResult(
                     success=False,
-                    error="no_available_proxy",
-                    message="无法选择代理端口",
+                    error="exit_ip_not_found",
+                    message=f"代理池中不存在出口 IP 为 {normalized_exit_ip} 的代理",
                 )
 
-            now = datetime.now()
-            lease_id = str(uuid.uuid4())
-            expires_at = now + timedelta(seconds=ttl)
-            lease = LeaseRecord(
-                lease_id=lease_id,
-                workspace_id=workspace_id,
-                proxy_port=port,
-                acquired_at=now,
-                expires_at=expires_at,
-            )
-            key = self._make_key(workspace_id, port)
-            self._active_leases[key] = lease
-            metrics = self._update_usage(workspace_id, port)
+            matching_ports = [int(proxy["port"]) for proxy in matching_proxies]
+            matching_port_set = set(matching_ports)
 
-            logger.info("Lease acquired: %s -> port %s, ttl=%ss", workspace_id, port, ttl)
-            return LeaseResult(
-                success=True,
-                lease_id=lease_id,
-                proxy_port=port,
-                expires_at=expires_at,
-                metrics=metrics,
+            if all(self._has_active_lease_for_port(port) for port in matching_port_set):
+                return LeaseResult(
+                    success=False,
+                    error="exit_ip_occupied",
+                    message=f"出口 IP {normalized_exit_ip} 的代理当前均已被租约占用",
+                )
+
+            available_ports = [
+                port
+                for port in self._get_available_ports(workspace_id)
+                if port in matching_port_set
+            ]
+            if not available_ports:
+                return LeaseResult(
+                    success=False,
+                    error="exit_ip_unavailable",
+                    message=f"出口 IP {normalized_exit_ip} 的代理当前不可分配（可能处于冷却、健康禁用或未恢复状态）",
+                )
+
+            return self._acquire_from_ports(
+                workspace_id,
+                available_ports,
+                ttl,
+                initial_port_ordering=initial_port_ordering,
+                no_available_error="exit_ip_unavailable",
+                no_available_message=f"出口 IP {normalized_exit_ip} 的代理当前不可分配",
             )
 
     def release(
@@ -887,7 +989,7 @@ class LeaseManager:
                 "total_active_leases": len(self._active_leases),
                 "total_cooldowns": len(self._cooldowns),
                 "workspaces": sorted(workspaces),
-                "proxies_by_usage": proxies_by_usage[:20],
+                "proxies_by_usage": proxies_by_usage,
             }
 
 

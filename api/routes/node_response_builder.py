@@ -31,6 +31,7 @@ def build_node_response(
         latency_ms=node.get("latency_ms"),
         exit_ip=node.get("exit_ip"),
         exit_country=node.get("exit_country"),
+        exit_country_code=node.get("exit_country_code"),
         runtime_supported=capability.runtime_supported,
         runtime_support_reason=capability.reason,
         in_proxy_pool=proxy_port is not None,

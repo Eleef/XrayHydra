@@ -20,6 +20,7 @@ from src.xray_prism.models import (
     Protocol,
     NetworkType,
 )
+from src.xray_prism.proxy_runtime import build_proxy_address
 from src.xray_prism.generator import ConfigGenerator
 from src.xray_prism.runner import XrayRunner
 from src.xray_prism.tester import ProxyTester
@@ -29,7 +30,6 @@ from api.services.custom_group_service import get_custom_group_service
 
 logger = logging.getLogger(__name__)
 
-PROXY_BIND_HOST = "127.0.0.1"
 DEFAULT_PROXY_SCHEME = "http"
 SUPPORTED_PROXY_PROTOCOLS = ("http", "socks5")
 POOL_STATUS_ACTIVE = "active"
@@ -39,7 +39,7 @@ DISABLED_REASON_EXIT_IP_DUPLICATE = "exit_ip_duplicate"
 
 def build_proxy_access_fields(port: int) -> Dict[str, object]:
     """Build explicit client-facing access metadata for a local proxy port."""
-    proxy_address = f"{PROXY_BIND_HOST}:{port}"
+    proxy_address = build_proxy_address(port)
     return {
         "proxy_address": proxy_address,
         "proxy_scheme": DEFAULT_PROXY_SCHEME,
@@ -143,6 +143,8 @@ class ProxyService:
         normalized["pool_status"] = pool_status
         normalized["disabled_reason"] = normalized.get("disabled_reason") if pool_status != POOL_STATUS_ACTIVE else None
         normalized["disabled_at"] = normalized.get("disabled_at") if pool_status != POOL_STATUS_ACTIVE else None
+        normalized.setdefault("exit_country", None)
+        normalized.setdefault("exit_country_code", None)
         return normalized
 
     @staticmethod
@@ -283,6 +285,39 @@ class ProxyService:
         if include_disabled:
             return [dict(proxy) for proxy in proxies]
         return [dict(proxy) for proxy in proxies if self.is_proxy_enabled(proxy)]
+
+    def get_proxy_by_port(self, port: int, include_disabled: bool = True) -> Optional[Dict]:
+        """Return one proxy record by local port."""
+        self._load_data()
+        for proxy in self._data.get("proxies", []):
+            if int(proxy.get("port", 0)) != int(port):
+                continue
+            if include_disabled or self.is_proxy_enabled(proxy):
+                return dict(proxy)
+            return None
+        return None
+
+    def get_proxies_by_exit_ip(self, exit_ip: str, include_disabled: bool = True) -> List[Dict]:
+        """Return proxy records whose tested exit IP matches the provided value."""
+        normalized_exit_ip = str(exit_ip or "").strip()
+        if not normalized_exit_ip:
+            return []
+        return [
+            proxy
+            for proxy in self.get_all_proxies(include_disabled=include_disabled)
+            if str(proxy.get("exit_ip") or "").strip() == normalized_exit_ip
+        ]
+
+    def get_proxies_by_country_code(self, country_code: str, include_disabled: bool = True) -> List[Dict]:
+        """Return proxy records whose tested exit country code matches the provided value."""
+        normalized_code = str(country_code or "").strip().upper()
+        if not normalized_code:
+            return []
+        return [
+            proxy
+            for proxy in self.get_all_proxies(include_disabled=include_disabled)
+            if str(proxy.get("exit_country_code") or "").strip().upper() == normalized_code
+        ]
     
     def get_xray_status(self) -> str:
         """Get current Xray status."""
@@ -431,6 +466,8 @@ class ProxyService:
                 "test_status": "pending",
                 "latency_ms": None,
                 "exit_ip": None,
+                "exit_country": None,
+                "exit_country_code": None,
                 "pool_status": POOL_STATUS_ACTIVE,
                 "disabled_reason": None,
                 "disabled_at": None,
@@ -705,11 +742,15 @@ class ProxyService:
                 proxy["test_status"] = "success"
                 proxy["latency_ms"] = int(success_result.latency_ms) if success_result.latency_ms else None
                 proxy["exit_ip"] = success_result.exit_ip
+                proxy["exit_country"] = success_result.country
+                proxy["exit_country_code"] = success_result.country_code
                 error = None
             else:
                 proxy["test_status"] = "failed"
                 proxy["latency_ms"] = None
                 proxy["exit_ip"] = None
+                proxy["exit_country"] = None
+                proxy["exit_country_code"] = None
                 error = item["last_error"]
 
             test_results.append({
@@ -719,6 +760,8 @@ class ProxyService:
                 "status": proxy["test_status"],
                 "latency_ms": proxy["latency_ms"],
                 "exit_ip": proxy["exit_ip"],
+                "exit_country": proxy.get("exit_country"),
+                "exit_country_code": proxy.get("exit_country_code"),
                 "error": error,
                 "failed_attempts": failed_attempts,
             })
@@ -766,10 +809,14 @@ class ProxyService:
             proxy["test_status"] = "success"
             proxy["latency_ms"] = int(result.latency_ms) if result.latency_ms else None
             proxy["exit_ip"] = result.exit_ip
+            proxy["exit_country"] = result.country
+            proxy["exit_country_code"] = result.country_code
         else:
             proxy["test_status"] = "failed"
             proxy["latency_ms"] = None
             proxy["exit_ip"] = None
+            proxy["exit_country"] = None
+            proxy["exit_country_code"] = None
         
         self._save_data()
         
@@ -780,6 +827,8 @@ class ProxyService:
             "status": proxy["test_status"],
             "latency_ms": proxy["latency_ms"],
             "exit_ip": proxy["exit_ip"],
+            "exit_country": proxy.get("exit_country"),
+            "exit_country_code": proxy.get("exit_country_code"),
             "error": result.error
         }
 

@@ -259,6 +259,25 @@ class XrayPrismClient:
         json_body = None
         return self._request('POST', f'/api/proxies/{port}/test', params=params, json_body=json_body, requires_auth=False)
 
+    def list_proxy_exit_ips_by_country_code(self, country_code: str, workspace_id: str, available_only: bool = False) -> models.CountryExitIpListResponse:
+        """List Proxy Exit Ips By Country Code."""
+        # List unique tested exit IPs in the active proxy pool for one ISO country code and workspace.
+        params: dict[str, Any] = {}
+        if workspace_id is not None:
+            params['workspace_id'] = workspace_id
+        if available_only is not None:
+            params['available_only'] = available_only
+        json_body = None
+        return self._request('GET', f'/api/proxies/exit-ips/by-country/{country_code}', params=params, json_body=json_body, requires_auth=False)
+
+    def list_exit_ips_by_country_code(self, workspace_id: str, country_code: str, available_only: bool = False) -> models.CountryExitIpListResponse:
+        """Friendly alias for listing exit IPs by ISO country code."""
+        return self.list_proxy_exit_ips_by_country_code(
+            country_code=country_code,
+            workspace_id=workspace_id,
+            available_only=available_only,
+        )
+
     def get_system_status(self) -> models.SystemStatusResponse:
         """Get System Status."""
         # Get overall system status.
@@ -361,6 +380,17 @@ class XrayPrismClient:
         json_body = dict(payload)
         return self._request('POST', '/api/lease/acquire', params=params, json_body=json_body, requires_auth=True)
 
+    def acquire_lease_by_exit_ip(self, payload: models.LeaseAcquireByExitIpRequest) -> models.LeaseAcquireResponse:
+        """按出口 IP 申请代理租约."""
+        # 为指定 workspace 按出口 IP 申请一个代理租约。
+        # - **workspace_id**: 业务隔离标识（不同 workspace 可使用同一代理）
+        # - **exit_ip**: 希望命中的测试出口 IP
+        # - **ttl**: 租约有效时间（秒），超时自动释放
+        # 如果同一出口 IP 对应多个代理，会按当前可用候选集中的现有选择规则自动挑选一个。
+        params = None
+        json_body = dict(payload)
+        return self._request('POST', '/api/lease/acquire/by-exit-ip', params=params, json_body=json_body, requires_auth=True)
+
     def release_lease(self, payload: models.LeaseReleaseRequest) -> models.LeaseReleaseResponse:
         """归还代理租约."""
         # 归还代理租约并可选设置冷却期。
@@ -416,3 +446,10 @@ class XrayPrismClient:
         params = None
         json_body = None
         return self._request('GET', '/api/lease/stats', params=params, json_body=json_body, requires_auth=True)
+
+    def lookup_ip_region(self, ip: str) -> models.IpGeoLookupResponse:
+        """Lookup Ip Region."""
+        # Resolve country name and ISO alpha-2 country code for one IP address.
+        params = None
+        json_body = None
+        return self._request('GET', f'/api/geo/ip/{ip}', params=params, json_body=json_body, requires_auth=False)

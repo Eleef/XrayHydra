@@ -87,6 +87,7 @@ class NodeTestService:
         latency_ms: Optional[int] = None,
         exit_ip: Optional[str] = None,
         exit_country: Optional[str] = None,
+        exit_country_code: Optional[str] = None,
     ) -> None:
         if self._subscription_service.get_node(node_id):
             self._subscription_service.update_node_test_result(
@@ -95,6 +96,7 @@ class NodeTestService:
                 latency_ms=latency_ms,
                 exit_ip=exit_ip,
                 exit_country=exit_country,
+                exit_country_code=exit_country_code,
             )
             return
         self._custom_group_service.update_node_test_result(
@@ -103,6 +105,7 @@ class NodeTestService:
             latency_ms=latency_ms,
             exit_ip=exit_ip,
             exit_country=exit_country,
+            exit_country_code=exit_country_code,
         )
 
     def _snapshot_job(self, job: NodeTestJob) -> Dict[str, object]:
@@ -256,6 +259,7 @@ class NodeTestService:
         latency_ms: Optional[int] = None,
         exit_ip: Optional[str] = None,
         exit_country: Optional[str] = None,
+        exit_country_code: Optional[str] = None,
         error: Optional[str] = None,
         tested_target: Optional[str] = None,
         successful_target: Optional[str] = None,
@@ -269,6 +273,7 @@ class NodeTestService:
             "latency_ms": latency_ms,
             "exit_ip": exit_ip,
             "exit_country": exit_country,
+            "exit_country_code": exit_country_code,
             "error": error,
             "tested_target": tested_target,
             "successful_target": successful_target,
@@ -454,6 +459,7 @@ class NodeTestService:
                         latency_ms=self._normalize_latency(item.latency_ms),
                         exit_ip=item.exit_ip,
                         exit_country=item.country,
+                        exit_country_code=item.country_code,
                         tested_target=target,
                         successful_target=target,
                     )
@@ -581,6 +587,7 @@ class NodeTestService:
                             latency_ms=None,
                             exit_ip=None,
                             exit_country=None,
+                            exit_country_code=None,
                         )
                 return {
                     "results": ordered_results,
@@ -684,6 +691,7 @@ class NodeTestService:
                     latency_ms=None,
                     exit_ip=None,
                     exit_country=None,
+                    exit_country_code=None,
                 )
                 continue
 
@@ -695,6 +703,7 @@ class NodeTestService:
                 latency_ms=item.get("latency_ms"),
                 exit_ip=item.get("exit_ip"),
                 exit_country=item.get("exit_country"),
+                exit_country_code=item.get("exit_country_code"),
             )
 
         success_count = sum(1 for item in ordered_results if item["status"] == "success")

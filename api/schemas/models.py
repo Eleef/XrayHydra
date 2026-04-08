@@ -112,6 +112,7 @@ class NodeResponse(BaseModel):
                 "latency_ms": None,
                 "exit_ip": None,
                 "exit_country": None,
+                "exit_country_code": None,
                 "runtime_supported": True,
                 "runtime_support_reason": None,
                 "in_proxy_pool": False,
@@ -131,6 +132,7 @@ class NodeResponse(BaseModel):
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
     exit_country: Optional[str] = None
+    exit_country_code: Optional[str] = None
     runtime_supported: bool = True
     runtime_support_reason: Optional[str] = None
     in_proxy_pool: bool = False
@@ -262,6 +264,7 @@ class NodeTestResult(BaseModel):
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
     exit_country: Optional[str] = None
+    exit_country_code: Optional[str] = None
     error: Optional[str] = None
     test_profile: Optional[str] = None
     tested_target: Optional[str] = None
@@ -341,6 +344,8 @@ class ProxyResponse(BaseModel):
                 "test_status": "success",
                 "latency_ms": 420,
                 "exit_ip": "203.0.113.10",
+                "exit_country": "United States",
+                "exit_country_code": "US",
                 "pool_status": "active",
                 "disabled_reason": None,
                 "runtime_loaded": True,
@@ -363,10 +368,42 @@ class ProxyResponse(BaseModel):
     test_status: TestStatus = TestStatus.PENDING
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
+    exit_country: Optional[str] = None
+    exit_country_code: Optional[str] = None
     pool_status: ProxyPoolStatus = ProxyPoolStatus.ACTIVE
     disabled_reason: Optional[str] = None
     runtime_loaded: bool = True
     runtime_load_reason: Optional[str] = None
+
+
+class CountryExitIpItem(BaseModel):
+    """One unique tested exit IP grouped by ISO country code for one workspace."""
+
+    exit_ip: str
+    country: Optional[str] = None
+    country_code: str
+    proxy_count: int
+    available_proxy_count: int
+    occupied_proxy_count: int
+    unavailable_proxy_count: int
+
+
+class CountryExitIpListResponse(BaseModel):
+    """Unique exit IPs for one workspace filtered by ISO country code."""
+
+    workspace_id: str
+    country_code: str
+    available_only: bool = False
+    items: List[CountryExitIpItem]
+    total: int
+
+
+class IpGeoLookupResponse(BaseModel):
+    """Geo lookup result for one concrete IP address."""
+
+    ip: str
+    country: str
+    country_code: str
 
 
 class ProxyListResponse(BaseModel):
