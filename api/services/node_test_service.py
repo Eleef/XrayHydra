@@ -25,6 +25,7 @@ from api.services.custom_group_service import get_custom_group_service
 from api.services.subscription_service import get_subscription_service
 from src.xray_prism.generator import ConfigGenerator
 from src.xray_prism.capabilities import evaluate_node_runtime
+from src.xray_prism.proxy_runtime import get_proxy_inbound_protocol, get_proxy_probe_scheme
 from src.xray_prism.models import (
     NetworkType,
     PortMapping,
@@ -32,7 +33,12 @@ from src.xray_prism.models import (
     ProxyNode,
 )
 from src.xray_prism.runner import XrayRunner
-from src.xray_prism.tester import BACKUP_IP_APIs, DEFAULT_IP_API, ProxyTester
+from src.xray_prism.tester import (
+    DEFAULT_CONNECTIVITY_TARGETS,
+    DEFAULT_EXIT_INFO_TARGETS,
+    MIN_CONNECTIVITY_SUCCESSES,
+    ProxyTester,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +270,10 @@ class NodeTestService:
         tested_target: Optional[str] = None,
         successful_target: Optional[str] = None,
         test_profile: str = "multi_target",
+        connectivity_status: str = "failed",
+        successful_target_count: int = 0,
+        tested_targets: Optional[List[str]] = None,
+        exit_info_complete: bool = False,
     ) -> Dict[str, object]:
         return {
             "node_id": node_id,
@@ -278,6 +288,10 @@ class NodeTestService:
             "tested_target": tested_target,
             "successful_target": successful_target,
             "test_profile": test_profile,
+            "connectivity_status": connectivity_status,
+            "successful_target_count": successful_target_count,
+            "tested_targets": tested_targets or [],
+            "exit_info_complete": exit_info_complete,
         }
 
     @staticmethod
@@ -350,170 +364,90 @@ class NodeTestService:
         total_nodes: Optional[int] = None,
         prefailed_count: int = 0,
     ) -> Dict[str, Dict[str, object]]:
-        remaining: Dict[int, PortMapping] = {mapping.local_port: mapping for mapping in mappings}
         results_by_node_id: Dict[str, Dict[str, object]] = {}
-        last_errors: Dict[int, Optional[str]] = {mapping.local_port: None for mapping in mappings}
-        targets = [DEFAULT_IP_API, *BACKUP_IP_APIs]
+        connectivity_targets = list(DEFAULT_CONNECTIVITY_TARGETS)
+        exit_info_targets = list(DEFAULT_EXIT_INFO_TARGETS)
+        total_targets = len(connectivity_targets) + len(exit_info_targets)
 
-        for target_index, target in enumerate(targets, start=1):
-            if not remaining:
-                break
-
-            round_total = len(remaining)
-            completed_before_round = len(results_by_node_id) + prefailed_count
-            round_success_count = 0
-            round_failure_count = 0
-            if job_id:
-                self._update_job(
-                    job_id,
-                    status="running",
-                    total=total_nodes or (len(mappings) + prefailed_count),
-                    completed_count=completed_before_round,
-                    success_count=len(results_by_node_id),
-                    failed_count=prefailed_count,
-                    progress_percent=self._calculate_progress_percent(
-                        target_index=target_index,
-                        target_total=len(targets),
-                        current_target_completed=0,
-                        current_target_total=round_total,
-                    ),
-                    active_target=target,
-                    target_index=target_index,
-                    target_total=len(targets),
-                    current_target_completed=0,
-                    current_target_total=round_total,
-                    note=f"正在测试目标 {target_index}/{len(targets)}",
-                )
-
-            def _on_round_progress(round_completed: int, total_for_round: int) -> None:
-                if not job_id:
-                    return
-                self._update_job(
-                    job_id,
-                    total=total_nodes or (len(mappings) + prefailed_count),
-                    completed_count=completed_before_round,
-                    success_count=len(results_by_node_id),
-                    failed_count=prefailed_count,
-                    progress_percent=self._calculate_progress_percent(
-                        target_index=target_index,
-                        target_total=len(targets),
-                        current_target_completed=round_completed,
-                        current_target_total=total_for_round,
-                    ),
-                    active_target=target,
-                    target_index=target_index,
-                    target_total=len(targets),
-                    current_target_completed=round_completed,
-                    current_target_total=total_for_round,
-                    note=f"目标 {target_index}/{len(targets)} 已检测 {round_completed}/{total_for_round}",
-                )
-
-            def _on_round_result(item, round_completed: int, total_for_round: int) -> None:
-                nonlocal round_success_count, round_failure_count
-                if item.success:
-                    round_success_count += 1
-                else:
-                    round_failure_count += 1
-                if not job_id:
-                    return
-                confirmed_success = len(results_by_node_id) + round_success_count
-                current_failed = prefailed_count + round_failure_count
-                self._update_job(
-                    job_id,
-                    total=total_nodes or (len(mappings) + prefailed_count),
-                    completed_count=completed_before_round + round_success_count,
-                    success_count=confirmed_success,
-                    failed_count=current_failed,
-                    progress_percent=self._calculate_progress_percent(
-                        target_index=target_index,
-                        target_total=len(targets),
-                        current_target_completed=round_completed,
-                        current_target_total=total_for_round,
-                    ),
-                    active_target=target,
-                    target_index=target_index,
-                    target_total=len(targets),
-                    current_target_completed=round_completed,
-                    current_target_total=total_for_round,
-                    note=f"目标 {target_index}/{len(targets)} 已检测 {round_completed}/{total_for_round}",
-                )
-
-            tester = ProxyTester(
-                timeout=timeout,
-                ip_api=target,
-                max_workers=min(20, max(1, len(remaining))),
+        if job_id:
+            self._update_job(
+                job_id,
+                status="running",
+                total=total_nodes or (len(mappings) + prefailed_count),
+                completed_count=prefailed_count,
+                success_count=0,
+                failed_count=prefailed_count,
+                progress_percent=0,
+                active_target="multi_target",
+                target_index=1,
+                target_total=total_targets,
+                current_target_completed=0,
+                current_target_total=len(mappings),
+                note="正在执行多目标连通性与出口测试",
             )
-            round_results = tester.test_all(
-                list(remaining.values()),
-                progress_callback=_on_round_progress if job_id else None,
-                result_callback=_on_round_result if job_id else None,
-            )
-            for item in round_results:
-                if item.success:
-                    node_id = node_id_by_port[item.local_port]
-                    results_by_node_id[node_id] = self._build_result(
-                        node_id=node_id,
-                        node_name=node_name_by_id[node_id],
-                        proxy_port=item.local_port,
-                        status="success",
-                        latency_ms=self._normalize_latency(item.latency_ms),
-                        exit_ip=item.exit_ip,
-                        exit_country=item.country,
-                        exit_country_code=item.country_code,
-                        tested_target=target,
-                        successful_target=target,
-                    )
-                    remaining.pop(item.local_port, None)
-                else:
-                    last_errors[item.local_port] = item.error
 
-            if job_id:
-                self._update_job(
+        tester = ProxyTester(
+            timeout=timeout,
+            max_workers=min(20, max(1, len(mappings))),
+            connectivity_targets=connectivity_targets,
+            exit_info_targets=exit_info_targets,
+            min_connectivity_successes=MIN_CONNECTIVITY_SUCCESSES,
+        )
+        round_results = tester.test_all(
+            list(mappings),
+            proxy_type=get_proxy_probe_scheme(),
+            progress_callback=(
+                lambda completed, total_for_round: self._update_job(
                     job_id,
                     total=total_nodes or (len(mappings) + prefailed_count),
-                    completed_count=len(results_by_node_id) + prefailed_count,
-                    success_count=len(results_by_node_id),
-                    failed_count=prefailed_count,
-                    progress_percent=self._calculate_progress_percent(
-                        target_index=target_index,
-                        target_total=len(targets),
-                        current_target_completed=round_total,
-                        current_target_total=round_total,
-                    ),
-                    active_target=target,
-                    target_index=target_index,
-                    target_total=len(targets),
-                    current_target_completed=round_total,
-                    current_target_total=round_total,
-                    note=f"目标 {target_index}/{len(targets)} 完成，剩余 {len(remaining)} 个节点待重试",
+                    completed_count=prefailed_count + completed,
+                    success_count=sum(1 for item in results_by_node_id.values() if item["status"] == "success"),
+                    failed_count=prefailed_count + sum(1 for item in results_by_node_id.values() if item["status"] == "failed"),
+                    progress_percent=min(99, round((completed / max(1, total_for_round)) * 100)),
+                    active_target="multi_target",
+                    target_index=total_targets,
+                    target_total=total_targets,
+                    current_target_completed=completed,
+                    current_target_total=total_for_round,
+                    note=f"已检测 {completed}/{total_for_round}",
                 )
+            ) if job_id else None,
+        )
 
-        final_target = targets[-1] if targets else None
-        for port, mapping in remaining.items():
-            node_id = node_id_by_port[port]
+        for item in round_results:
+            node_id = node_id_by_port[item.local_port]
             results_by_node_id[node_id] = self._build_result(
                 node_id=node_id,
                 node_name=node_name_by_id[node_id],
-                proxy_port=port,
-                status="failed",
-                error=last_errors.get(port) or "all test targets failed",
-                tested_target=final_target,
+                proxy_port=item.local_port,
+                status="success" if item.success else "failed",
+                latency_ms=self._normalize_latency(item.latency_ms),
+                exit_ip=item.exit_ip,
+                exit_country=item.country,
+                exit_country_code=item.country_code,
+                error=item.error,
+                tested_target=item.tested_target,
+                successful_target=item.successful_target,
+                test_profile="multi_target",
+                connectivity_status=item.connectivity_status,
+                successful_target_count=item.successful_target_count,
+                tested_targets=item.tested_targets,
+                exit_info_complete=item.exit_info_complete,
             )
 
         if job_id:
-            failed_total = len(remaining) + prefailed_count
             self._update_job(
                 job_id,
                 total=total_nodes or (len(mappings) + prefailed_count),
                 completed_count=len(results_by_node_id) + prefailed_count,
                 success_count=sum(1 for item in results_by_node_id.values() if item["status"] == "success"),
-                failed_count=failed_total,
+                failed_count=prefailed_count + sum(1 for item in results_by_node_id.values() if item["status"] == "failed"),
                 progress_percent=99,
-                active_target=final_target,
-                target_index=len(targets),
-                target_total=len(targets),
-                current_target_completed=len(remaining),
-                current_target_total=max(1, len(remaining)),
+                active_target="multi_target",
+                target_index=total_targets,
+                target_total=total_targets,
+                current_target_completed=len(mappings),
+                current_target_total=len(mappings),
                 note="整理最终测试结果",
             )
 
@@ -627,7 +561,7 @@ class NodeTestService:
             tmp_path = Path(tmpdir)
             config_path = tmp_path / "node_test_config.json"
             metadata_path = tmp_path / "xray_runner.test.json"
-            generator = ConfigGenerator(inbound_protocol="socks")
+            generator = ConfigGenerator(inbound_protocol=get_proxy_inbound_protocol())
             generator.generate_and_save_with_mappings(mappings, str(config_path))
 
             runner = XrayRunner(

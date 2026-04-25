@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from api.services.proxy_service import ProxyService
+from src.xray_prism.proxy_runtime import get_proxy_default_scheme, get_proxy_probe_scheme
 
 
 class TestProxyService(unittest.TestCase):
@@ -114,7 +115,9 @@ class TestProxyService(unittest.TestCase):
         self.assertTrue(removed)
         self.service._runner.stop.assert_called_once()
         self.service._runner.start.assert_called_once_with(str(self.config_file))
-        mock_health_service.sync_with_proxies.assert_called_once_with([10001])
+        self.assertEqual(mock_health_service.sync_with_proxies.call_args_list, [(( [10001],), {})])
+        mock_health_service.run_health_check_async.assert_called_once_with([10001])
+        mock_health_service.run_health_check.assert_not_called()
 
     def test_stop_xray_clears_health_state_even_when_process_already_stopped(self):
         """Stop should clear stale health states even without an in-memory process."""
@@ -166,8 +169,8 @@ class TestProxyService(unittest.TestCase):
         mock_health_service.sync_with_proxies.assert_called_once_with([])
         mock_health_service.stop_monitoring.assert_called_once()
 
-    def test_regenerate_config_uses_socks_inbound_for_mixed_port_clients(self):
-        """Generated config should expose socks inbound so one port supports socks5 and HTTP clients."""
+    def test_regenerate_config_uses_runtime_proxy_inbound(self):
+        """Generated config should follow the shared runtime inbound protocol."""
         self._write_proxies([
             {"port": 10022, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443},
         ])
@@ -235,6 +238,40 @@ class TestProxyService(unittest.TestCase):
         self.assertEqual(fields["proxy_address"], "192.168.50.10:10022")
         self.assertEqual(fields["http_proxy_url"], "http://192.168.50.10:10022")
         self.assertEqual(fields["socks5_proxy_url"], "socks5://192.168.50.10:10022")
+        self.assertEqual(fields["proxy_scheme"], get_proxy_default_scheme())
+        self.assertEqual(fields["supported_proxy_protocols"], ["socks5"])
+
+    def test_test_single_proxy_uses_runtime_probe_scheme(self):
+        self._write_proxies([
+            {"port": 10000, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443},
+        ])
+        self.service._load_data()
+        self.service._runner = MagicMock()
+        self.service._runner.is_running.return_value = True
+        self.config_file.write_text(json.dumps({"inbounds": [{"port": 10000, "protocol": "socks"}]}, ensure_ascii=False), encoding="utf-8")
+
+        tester = MagicMock()
+        tester.test_port.return_value.success = False
+        tester.test_port.return_value.error = "请求超时"
+        tester.test_port.return_value.latency_ms = None
+        tester.test_port.return_value.exit_ip = None
+        tester.test_port.return_value.country = None
+        tester.test_port.return_value.country_code = None
+        tester.test_port.return_value.connectivity_status = "failed"
+        tester.test_port.return_value.successful_target_count = 0
+        tester.test_port.return_value.tested_targets = [
+            "https://www.gstatic.com/generate_204",
+            "https://www.google.com/generate_204",
+            "http://cp.cloudflare.com/",
+        ]
+        tester.test_port.return_value.exit_info_complete = False
+        tester.test_port.return_value.tested_target = "http://cp.cloudflare.com/"
+        tester.test_port.return_value.successful_target = None
+
+        with patch("api.services.proxy_service.ProxyTester", return_value=tester):
+            self.service.test_single_proxy(10000, timeout=5)
+
+        tester.test_port.assert_called_once_with(10000, "Node 1", proxy_type=get_proxy_probe_scheme())
 
     def test_get_proxies_by_country_code_filters_exact_match(self):
         self._write_proxies([
@@ -294,6 +331,63 @@ class TestProxyService(unittest.TestCase):
         mock_health_service.sync_with_proxies.assert_called_once_with([10022])
         mock_health_service.start_monitoring.assert_called_once()
         mock_health_service.run_health_check.assert_called_once_with([10022])
+
+    def test_async_health_probe_is_used_after_adding_proxies_while_running(self):
+        mock_subscription_service = MagicMock()
+        mock_subscription_service.get_nodes_by_ids.return_value = [{
+            "id": "node_1",
+            "name": "Node 1",
+            "protocol": "trojan",
+            "address": "demo.example.com",
+            "port": 443,
+            "password": "secret",
+        }]
+        mock_custom_service = MagicMock()
+        mock_custom_service.get_nodes_by_ids.return_value = []
+        self.service._runner = MagicMock()
+        self.service._runner.is_running.return_value = True
+        self.config_file.write_text(
+            json.dumps(
+                {"inbounds": [{"port": 10000, "protocol": "socks"}]},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        mock_health_service = MagicMock()
+        with patch("api.services.proxy_service.get_subscription_service", return_value=mock_subscription_service), \
+             patch("api.services.proxy_service.get_custom_group_service", return_value=mock_custom_service), \
+             patch.object(self.service, "_regenerate_and_restart", side_effect=lambda immediate_probe=False: self.service._sync_health_runtime_state_async_probe()), \
+             patch("api.services.proxy_service.get_health_service", return_value=mock_health_service):
+            self.service.add_proxies(["node_1"])
+
+        mock_health_service.sync_with_proxies.assert_called_with([10000])
+        mock_health_service.start_monitoring.assert_called_once()
+        mock_health_service.run_health_check_async.assert_called_once_with([10000])
+        mock_health_service.run_health_check.assert_not_called()
+
+    def test_async_health_probe_is_used_after_removing_proxy_while_running(self):
+        self._write_proxies([
+            {"port": 10000, "node_id": "node_1", "node_name": "Node 1", "protocol": "trojan", "address": "a", "server_port": 443},
+        ])
+        self.service._load_data()
+        self.service._runner = MagicMock()
+        self.service._runner.is_running.return_value = True
+        self.config_file.write_text(
+            json.dumps({"inbounds": []}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        mock_health_service = MagicMock()
+        with patch.object(self.service, "_regenerate_and_restart", side_effect=lambda immediate_probe=False: self.service._sync_health_runtime_state_async_probe()), \
+             patch("api.services.proxy_service.get_health_service", return_value=mock_health_service):
+            removed = self.service.remove_proxy(10000)
+
+        self.assertTrue(removed)
+        mock_health_service.sync_with_proxies.assert_called_with([])
+        mock_health_service.stop_monitoring.assert_called_once()
+        mock_health_service.run_health_check_async.assert_not_called()
 
     def test_sync_health_runtime_state_stops_monitoring_when_config_has_no_runtime_ports(self):
         self._write_proxies([

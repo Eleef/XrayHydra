@@ -54,6 +54,11 @@ Access Points:
         action="store_true",
         help="Enable auto-reload for development",
     )
+    parser.add_argument(
+        "--no-autostart-xray",
+        action="store_true",
+        help="Disable auto-starting Xray when the web server boots",
+    )
     return parser
 
 
@@ -102,6 +107,13 @@ def run_server(args: argparse.Namespace) -> int:
 ╚══════════════════════════════════════════════════════════════╝
         """
     )
+
+    # Default behavior when started via `server.py`: auto-start Xray in the API startup hook.
+    # Respect user overrides (env var or CLI flag).
+    if getattr(args, "no_autostart_xray", False):
+        os.environ["XRAY_PRISM_AUTOSTART_XRAY"] = "0"
+    else:
+        os.environ.setdefault("XRAY_PRISM_AUTOSTART_XRAY", "1")
 
     uvicorn.run(
         "api.main:app",

@@ -13,6 +13,18 @@ def _make_result(port: int, success: bool, latency_ms: int | None = None, exit_i
         success=success,
         latency_ms=latency_ms,
         exit_ip=exit_ip,
+        country=None,
+        country_code=None,
+        connectivity_status="success" if success else "failed",
+        successful_target_count=2 if success else 0,
+        tested_targets=[
+            "https://www.gstatic.com/generate_204",
+            "https://www.google.com/generate_204",
+            "http://cp.cloudflare.com/",
+        ],
+        exit_info_complete=bool(success and exit_ip),
+        tested_target="http://ip-api.com/json" if success else "http://cp.cloudflare.com/",
+        successful_target="http://ip-api.com/json" if success else None,
         error=error,
     )
 

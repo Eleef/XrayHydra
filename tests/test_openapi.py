@@ -187,6 +187,8 @@ class TestOpenAPIContract(unittest.TestCase):
         health_props = schemas["ProxyHealthResponse"]["properties"]
         self.assertIn("last_error_category", health_props)
         self.assertIn("last_error_message", health_props)
+        self.assertIn("last_probe_summary", health_props)
+        self.assertIn("last_successful_target", health_props)
 
     def test_node_schemas_expose_pool_status_and_test_contract(self):
         """Node responses should expose pool status and node testing contract."""
@@ -240,6 +242,10 @@ class TestOpenAPIContract(unittest.TestCase):
         result_name = result_ref.rsplit("/", 1)[-1]
         result_props = schemas[result_name]["properties"]
         self.assertIn("status", result_props)
+        self.assertIn("connectivity_status", result_props)
+        self.assertIn("successful_target_count", result_props)
+        self.assertIn("tested_targets", result_props)
+        self.assertIn("exit_info_complete", result_props)
         self.assertIn("exit_country_code", result_props)
         test_status_name = result_props["status"]["$ref"].rsplit("/", 1)[-1]
         test_status_enum = schemas[test_status_name]["enum"]

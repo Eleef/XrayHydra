@@ -337,6 +337,10 @@ const Components = {
         const successfulTarget = node?.successful_target || node?.test_target || node?.target_hit || null;
         const testedTarget = node?.tested_target || node?.last_test_target || null;
         const failureReason = node?.test_error || node?.error || node?.error_message || null;
+        const connectivityStatus = node?.connectivity_status || (status === 'success' ? 'success' : 'failed');
+        const successfulTargetCount = Number(node?.successful_target_count || 0);
+        const testedTargets = Array.isArray(node?.tested_targets) ? node.tested_targets : [];
+        const exitInfoComplete = node?.exit_info_complete !== false;
         const runtimeUnsupported = Boolean(options.runtimeUnsupported);
         const runtimeSupportReason = options.runtimeSupportReason || '当前运行环境不支持此协议';
 
@@ -354,6 +358,25 @@ const Components = {
                 <div class="node-diagnostic success">
                     <span class="node-diagnostic-label">命中目标</span>
                     <span class="node-diagnostic-value">${this.escapeHtml(successfulTarget)}</span>
+                </div>
+            `);
+        }
+        const connectivityTargetCount = testedTargets.filter((target) =>
+            target.includes('generate_204') || target.includes('cp.cloudflare.com')
+        ).length || 3;
+        if (status !== 'pending') {
+            rows.push(`
+                <div class="node-diagnostic neutral">
+                    <span class="node-diagnostic-label">连通</span>
+                    <span class="node-diagnostic-value">${this.escapeHtml(connectivityStatus)} / ${successfulTargetCount}/${connectivityTargetCount}</span>
+                </div>
+            `);
+        }
+        if (status === 'success' && !exitInfoComplete) {
+            rows.push(`
+                <div class="node-diagnostic neutral">
+                    <span class="node-diagnostic-label">出口</span>
+                    <span class="node-diagnostic-value">未完整识别</span>
                 </div>
             `);
         }

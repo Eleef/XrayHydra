@@ -68,7 +68,7 @@ async def get_health_config():
     return HealthConfigResponse(
         enabled=config["enabled"],
         check_interval_seconds=config["check_interval_seconds"],
-        test_target=config["test_target"],
+        connectivity_targets=config["connectivity_targets"],
         test_timeout_seconds=config["test_timeout_seconds"],
         test_targets_presets=[
             TestTargetPreset(**p) for p in config["test_targets_presets"]
@@ -86,14 +86,14 @@ async def update_health_config(data: HealthConfigUpdate):
     config = service.update_config(
         enabled=data.enabled,
         check_interval_seconds=data.check_interval_seconds,
-        test_target=data.test_target,
+        connectivity_targets=data.connectivity_targets,
         test_timeout_seconds=data.test_timeout_seconds,
     )
     
     return HealthConfigResponse(
         enabled=config["enabled"],
         check_interval_seconds=config["check_interval_seconds"],
-        test_target=config["test_target"],
+        connectivity_targets=config["connectivity_targets"],
         test_timeout_seconds=config["test_timeout_seconds"],
         test_targets_presets=[
             TestTargetPreset(**p) for p in config["test_targets_presets"]

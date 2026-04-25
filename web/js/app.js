@@ -23,6 +23,7 @@ class App {
         this.nodes = [];
         this.selectedNodeIds = new Set();
         this.isNodeTesting = false;
+        this.isAddingToProxy = false;
         this.nodeViewFilters = {
             onlyAvailable: false,
             onlyNotInPool: false,
@@ -1483,8 +1484,10 @@ class App {
      */
     updateAddToProxyButton() {
         const count = this.getSelectedAddableNodeIds().length;
-        this.elements.btnAddToProxy.disabled = count === 0 || this.isNodeTesting;
-        this.elements.btnAddToProxy.title = this.isNodeTesting
+        this.elements.btnAddToProxy.disabled = count === 0 || this.isNodeTesting || this.isAddingToProxy;
+        this.elements.btnAddToProxy.title = this.isAddingToProxy
+            ? '正在添加节点到代理池，请稍候'
+            : this.isNodeTesting
             ? '节点测试进行中，请稍候'
             : (count > 0 ? '将已勾选且未入池的节点加入代理池' : '请先勾选未入池节点');
         this.elements.btnAddToProxy.innerHTML = `
@@ -1492,7 +1495,7 @@ class App {
                 <path d="M5 12h14"></path>
                 <path d="m12 5 7 7-7 7"></path>
             </svg>
-            添加到代理${count > 0 ? ` (${count})` : ''}
+            ${this.isAddingToProxy ? '添加中...' : `添加到代理${count > 0 ? ` (${count})` : ''}`}
         `;
     }
 
@@ -1558,11 +1561,15 @@ class App {
     updateAddSuccessToProxyButton() {
         if (!this.elements.btnAddSuccessToProxy) return;
         const count = this.getSuccessfulAddableNodeIds().length;
-        this.elements.btnAddSuccessToProxy.disabled = count === 0 || this.isNodeTesting;
-        this.elements.btnAddSuccessToProxy.title = this.isNodeTesting
+        this.elements.btnAddSuccessToProxy.disabled = count === 0 || this.isNodeTesting || this.isAddingToProxy;
+        this.elements.btnAddSuccessToProxy.title = this.isAddingToProxy
+            ? '正在添加节点到代理池，请稍候'
+            : this.isNodeTesting
             ? '节点测试进行中，请稍候'
             : (count > 0 ? '将当前筛选结果中测试成功且未入池的节点一次性加入代理池' : '当前筛选结果中暂无测试成功且未入池节点');
-        this.elements.btnAddSuccessToProxy.textContent = `一键加入成功项${count > 0 ? ` (${count})` : ''}`;
+        this.elements.btnAddSuccessToProxy.textContent = this.isAddingToProxy
+            ? '添加中...'
+            : `一键加入成功项${count > 0 ? ` (${count})` : ''}`;
     }
 
     getSelectedAddableNodeIds() {
@@ -1688,6 +1695,10 @@ class App {
                     ...node,
                     test_status: 'testing',
                     test_error: null,
+                    connectivity_status: 'failed',
+                    successful_target_count: 0,
+                    tested_targets: [],
+                    exit_info_complete: false,
                     successful_target: null,
                     tested_target: null,
                 };
@@ -1708,6 +1719,10 @@ class App {
             return {
                 ...node,
                 test_status: result.status || node.test_status,
+                connectivity_status: result.connectivity_status ?? (result.status === 'success' ? 'success' : 'failed'),
+                successful_target_count: result.successful_target_count ?? 0,
+                tested_targets: Array.isArray(result.tested_targets) ? result.tested_targets : [],
+                exit_info_complete: result.exit_info_complete ?? Boolean(result.exit_ip),
                 latency_ms: result.latency_ms ?? null,
                 exit_ip: result.exit_ip ?? null,
                 exit_country: result.exit_country ?? null,
@@ -1789,6 +1804,10 @@ class App {
             if (!node) return;
             previousResultsByNodeId.set(nodeId, {
                 test_status: node.test_status,
+                connectivity_status: node.connectivity_status,
+                successful_target_count: node.successful_target_count,
+                tested_targets: Array.isArray(node.tested_targets) ? [...node.tested_targets] : [],
+                exit_info_complete: node.exit_info_complete,
                 latency_ms: node.latency_ms,
                 exit_ip: node.exit_ip,
                 exit_country: node.exit_country,
@@ -1892,6 +1911,10 @@ class App {
                     return {
                         ...node,
                         test_status: previous.test_status,
+                        connectivity_status: previous.connectivity_status,
+                        successful_target_count: previous.successful_target_count,
+                        tested_targets: previous.tested_targets,
+                        exit_info_complete: previous.exit_info_complete,
                         latency_ms: previous.latency_ms,
                         exit_ip: previous.exit_ip,
                         exit_country: previous.exit_country,
@@ -1956,6 +1979,12 @@ class App {
     }
 
     async addNodesToProxy(nodeIds, mode = 'selected') {
+        if (this.isAddingToProxy) {
+            return;
+        }
+
+        this.isAddingToProxy = true;
+        this.updateNodeActionButtons();
         try {
             const addedProxies = await api.addProxies(nodeIds);
 
@@ -1986,6 +2015,9 @@ class App {
             Components.showToast(message, 'success');
         } catch (error) {
             Components.showToast(`添加失败: ${error.message}`, 'error');
+        } finally {
+            this.isAddingToProxy = false;
+            this.updateNodeActionButtons();
         }
     }
 
@@ -2292,7 +2324,6 @@ class App {
                 stateClass: 'unscoped',
                 stateLabel: '全局视图',
                 sourceLabel: '',
-                note: '请选择具体 workspace 进行手动冷却；测试全部可使用全局冷却。',
                 metrics: metricsDisplay.metrics,
                 metricsWorkspaceLabel: metricsDisplay.workspaceLabel,
                 showMetricsWorkspaceLabel: metricsDisplay.showWorkspaceLabel,
@@ -2908,7 +2939,9 @@ class App {
         if (category) {
             const categoryLabelMap = {
                 runtime_unavailable: '运行不可用',
-                probe_failed: '探测失败',
+                connectivity_failed: '连通性失败',
+                exit_info_failed: '出口识别失败',
+                network_advisory: '网络提示',
             };
             tooltip += ` | 分类: ${categoryLabelMap[category] || category}`;
         }

@@ -3,6 +3,8 @@ FastAPI application entry point.
 Provides REST API for Xray-Prism web frontend.
 """
 import sys
+import os
+import threading
 from pathlib import Path
 
 # Add project root to path
@@ -35,6 +37,38 @@ app = FastAPI(
         {"name": "System", "description": "Control Xray lifecycle and query runtime status."},
     ]
 )
+
+
+def _env_flag_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def maybe_autostart_xray() -> None:
+    """Auto-start Xray when explicitly enabled (used by `server.py`)."""
+    if not _env_flag_truthy(os.environ.get("XRAY_PRISM_AUTOSTART_XRAY")):
+        return
+
+    def _worker() -> None:
+        try:
+            from api.services.proxy_service import get_proxy_service
+            service = get_proxy_service()
+            result = service.start_xray()
+            # Do not raise on startup; log via stdout is fine for local script use.
+            if not result.get("success"):
+                # Common case: no proxies configured yet.
+                print(f"[xray-prism] Xray autostart skipped: {result.get('message')}")
+        except Exception as exc:
+            print(f"[xray-prism] Xray autostart failed: {exc}")
+
+    threading.Thread(target=_worker, daemon=True, name="XrayAutoStart").start()
+
+
+@app.on_event("startup")
+def _startup_autostart_xray() -> None:
+    maybe_autostart_xray()
+
 
 # Configure CORS
 app.add_middleware(

@@ -70,7 +70,7 @@ class HealthService:
     def _create_monitor(self) -> HealthMonitor:
         """Create a HealthMonitor instance with current config."""
         return HealthMonitor(
-            test_target=self._config.get("test_target", DEFAULT_CONFIG["test_target"]),
+            connectivity_targets=self._config.get("connectivity_targets", DEFAULT_CONFIG["connectivity_targets"]),
             timeout=self._config.get("test_timeout_seconds", DEFAULT_CONFIG["test_timeout_seconds"]),
             max_workers=self._config.get("max_workers", DEFAULT_CONFIG["max_workers"]),
             penalty_levels=self._config.get("penalty_levels_minutes", DEFAULT_CONFIG["penalty_levels_minutes"]),
@@ -103,7 +103,7 @@ class HealthService:
         return {
             "enabled": self._config.get("enabled", True),
             "check_interval_seconds": self._config.get("check_interval_seconds", 60),
-            "test_target": self._config.get("test_target", DEFAULT_CONFIG["test_target"]),
+            "connectivity_targets": self._config.get("connectivity_targets", DEFAULT_CONFIG["connectivity_targets"]),
             "test_timeout_seconds": self._config.get("test_timeout_seconds", 5),
             "test_targets_presets": self._config.get("test_targets_presets", DEFAULT_CONFIG["test_targets_presets"]),
             "penalty_levels_minutes": self._config.get("penalty_levels_minutes", DEFAULT_CONFIG["penalty_levels_minutes"]),
@@ -114,7 +114,7 @@ class HealthService:
         self,
         enabled: Optional[bool] = None,
         check_interval_seconds: Optional[int] = None,
-        test_target: Optional[str] = None,
+        connectivity_targets: Optional[List[str]] = None,
         test_timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -127,9 +127,11 @@ class HealthService:
             self._config["enabled"] = enabled
         if check_interval_seconds is not None:
             self._config["check_interval_seconds"] = max(10, check_interval_seconds)
-        if test_target is not None:
-            self._config["test_target"] = test_target
-            self._monitor.test_target = test_target
+        if connectivity_targets is not None:
+            normalized_targets = [target for target in connectivity_targets if target]
+            if normalized_targets:
+                self._config["connectivity_targets"] = normalized_targets
+                self._monitor.connectivity_targets = normalized_targets
         if test_timeout_seconds is not None:
             self._config["test_timeout_seconds"] = max(1, min(30, test_timeout_seconds))
             self._monitor.timeout = self._config["test_timeout_seconds"]
@@ -242,6 +244,33 @@ class HealthService:
         self._save_states()
         
         return self.get_all_health_states()
+
+    def _run_health_check_async_worker(self, ports: List[int]) -> None:
+        """Run one health-check round in a detached thread."""
+        try:
+            self.run_health_check(ports)
+        except Exception as e:
+            logger.error("Async health check error: %s", e)
+
+    def run_health_check_async(self, ports: Optional[List[int]] = None) -> bool:
+        """
+        Trigger a background health check without blocking the caller.
+
+        Returns:
+            bool: True when a background check was started, False when no ports were provided.
+        """
+        target_ports = list(ports or [])
+        if not target_ports:
+            return False
+
+        worker = threading.Thread(
+            target=self._run_health_check_async_worker,
+            args=(target_ports,),
+            daemon=True,
+            name="HealthCheckAsync",
+        )
+        worker.start()
+        return True
     
     # ==================== Background Monitoring ====================
     

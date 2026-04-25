@@ -197,11 +197,17 @@ async def test_all_proxies(timeout: int = 5, workers: int = 20, attempts: int = 
                 name=r["name"],
                 proxy_port=r.get("port"),
                 status=r["status"],
+                connectivity_status=r.get("connectivity_status", "failed"),
+                successful_target_count=r.get("successful_target_count", 0),
+                tested_targets=r.get("tested_targets", []),
+                exit_info_complete=r.get("exit_info_complete", False),
                 latency_ms=r.get("latency_ms"),
                 exit_ip=r.get("exit_ip"),
                 exit_country=r.get("exit_country"),
                 exit_country_code=r.get("exit_country_code"),
-                error=r.get("error")
+                error=r.get("error"),
+                tested_target=r.get("tested_target"),
+                successful_target=r.get("successful_target"),
             ) for r in result["results"]],
             success_count=result["success_count"],
             failed_count=result["failed_count"],
@@ -240,11 +246,17 @@ async def test_single_proxy(port: int, timeout: int = 5):
             node_id=result["node_id"],
             name=result["name"],
             status=result["status"],
+            connectivity_status=result.get("connectivity_status", "failed"),
+            successful_target_count=result.get("successful_target_count", 0),
+            tested_targets=result.get("tested_targets", []),
+            exit_info_complete=result.get("exit_info_complete", False),
             latency_ms=result.get("latency_ms"),
             exit_ip=result.get("exit_ip"),
             exit_country=result.get("exit_country"),
             exit_country_code=result.get("exit_country_code"),
-            error=result.get("error")
+            error=result.get("error"),
+            tested_target=result.get("tested_target"),
+            successful_target=result.get("successful_target"),
         )
     except (RuntimeError, ValueError) as e:
         raise HTTPException(

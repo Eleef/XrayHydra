@@ -8,7 +8,7 @@ Xray-Prism 数据模型层
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 class Protocol(Enum):
@@ -150,6 +150,13 @@ class TestResult:
     latency_ms: Optional[float] = None
     country: Optional[str] = None
     country_code: Optional[str] = None
+    connectivity_status: str = "failed"
+    successful_target_count: int = 0
+    tested_targets: List[str] = field(default_factory=list)
+    successful_target: Optional[str] = None
+    tested_target: Optional[str] = None
+    exit_info_complete: bool = False
+    last_probe_summary: Optional[str] = None
     
     # 失败时填充
     error: Optional[str] = None
@@ -210,6 +217,8 @@ class ProxyHealthState:
     last_latency_ms: Optional[float] = None   # 最后成功延迟
     last_error_category: Optional[str] = None
     last_error_message: Optional[str] = None
+    last_probe_summary: Optional[str] = None
+    last_successful_target: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
@@ -231,6 +240,10 @@ class ProxyHealthState:
             result["last_error_category"] = self.last_error_category
         if self.last_error_message:
             result["last_error_message"] = self.last_error_message
+        if self.last_probe_summary:
+            result["last_probe_summary"] = self.last_probe_summary
+        if self.last_successful_target:
+            result["last_successful_target"] = self.last_successful_target
         return result
     
     @classmethod
@@ -258,4 +271,6 @@ class ProxyHealthState:
             last_latency_ms=data.get("last_latency_ms"),
             last_error_category=data.get("last_error_category"),
             last_error_message=data.get("last_error_message"),
+            last_probe_summary=data.get("last_probe_summary"),
+            last_successful_target=data.get("last_successful_target"),
         )

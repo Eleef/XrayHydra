@@ -21,6 +21,12 @@ from src.xray_prism.models import (
     NetworkType,
 )
 from src.xray_prism.proxy_runtime import build_proxy_address
+from src.xray_prism.proxy_runtime import (
+    get_proxy_default_scheme,
+    get_proxy_supported_client_protocols,
+    get_proxy_inbound_protocol,
+    get_proxy_probe_scheme,
+)
 from src.xray_prism.generator import ConfigGenerator
 from src.xray_prism.runner import XrayRunner
 from src.xray_prism.tester import ProxyTester
@@ -30,8 +36,6 @@ from api.services.custom_group_service import get_custom_group_service
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROXY_SCHEME = "http"
-SUPPORTED_PROXY_PROTOCOLS = ("http", "socks5")
 POOL_STATUS_ACTIVE = "active"
 POOL_STATUS_DEDUPE_DISABLED = "dedupe_disabled"
 DISABLED_REASON_EXIT_IP_DUPLICATE = "exit_ip_duplicate"
@@ -40,10 +44,12 @@ DISABLED_REASON_EXIT_IP_DUPLICATE = "exit_ip_duplicate"
 def build_proxy_access_fields(port: int) -> Dict[str, object]:
     """Build explicit client-facing access metadata for a local proxy port."""
     proxy_address = build_proxy_address(port)
+    supported_protocols = get_proxy_supported_client_protocols()
+    default_scheme = get_proxy_default_scheme()
     return {
         "proxy_address": proxy_address,
-        "proxy_scheme": DEFAULT_PROXY_SCHEME,
-        "supported_proxy_protocols": list(SUPPORTED_PROXY_PROTOCOLS),
+        "proxy_scheme": default_scheme,
+        "supported_proxy_protocols": supported_protocols,
         "http_proxy_url": f"http://{proxy_address}",
         "socks5_proxy_url": f"socks5://{proxy_address}",
         "socks5h_proxy_url": f"socks5h://{proxy_address}",
@@ -277,6 +283,26 @@ class ProxyService:
                 health_service.run_health_check(active_ports)
         else:
             health_service.stop_monitoring()
+
+    def _sync_health_runtime_state_async_probe(self) -> None:
+        """
+        Keep runtime health state aligned without blocking foreground mutations.
+
+        Proxy-pool mutations like "add to proxy" should return quickly. We still
+        sync the active runtime port set immediately, but the expensive initial
+        probe runs in a background worker.
+        """
+        health_service = get_health_service()
+        active_ports = self._get_runtime_proxy_ports()
+        health_service.sync_with_proxies(active_ports)
+
+        if active_ports:
+            health_service.start_monitoring(
+                lambda: self._get_runtime_proxy_ports()
+            )
+            health_service.run_health_check_async(active_ports)
+        else:
+            health_service.stop_monitoring()
     
     def get_all_proxies(self, include_disabled: bool = True) -> List[Dict]:
         """Get proxies in the pool, optionally excluding dedupe-disabled entries."""
@@ -397,7 +423,7 @@ class ProxyService:
         self._save_data()
 
         if self._is_xray_running():
-            self._regenerate_and_restart()
+            self._regenerate_and_restart(immediate_probe=False)
         else:
             self._sync_health_runtime_state()
 
@@ -482,7 +508,7 @@ class ProxyService:
         
         # Regenerate config if Xray is running
         if self._is_xray_running():
-            self._regenerate_and_restart()
+            self._regenerate_and_restart(immediate_probe=False)
         else:
             self._sync_health_runtime_state()
 
@@ -503,7 +529,7 @@ class ProxyService:
             
             # Regenerate config if Xray is running
             if self._is_xray_running():
-                self._regenerate_and_restart()
+                self._regenerate_and_restart(immediate_probe=False)
             else:
                 self._sync_health_runtime_state()
             
@@ -560,13 +586,13 @@ class ProxyService:
             if local_port:
                 port_mappings.append(PortMapping(local_port=local_port, node=node))
         
-        generator = ConfigGenerator(inbound_protocol="socks")
+        generator = ConfigGenerator(inbound_protocol=get_proxy_inbound_protocol())
         # Use port_mappings for generation
         generator.generate_and_save_with_mappings(port_mappings, str(self.CONFIG_FILE))
         
         return str(self.CONFIG_FILE)
     
-    def _regenerate_and_restart(self):
+    def _regenerate_and_restart(self, immediate_probe: bool = True):
         """Regenerate config and restart Xray."""
         runner = self._get_runner()
         enabled_proxies = self.get_all_proxies(include_disabled=False)
@@ -593,7 +619,10 @@ class ProxyService:
         time.sleep(0.5)
         runner.start(config_path)
         self._start_time = time.time()
-        self._sync_health_runtime_state(ensure_monitoring=True)
+        if immediate_probe:
+            self._sync_health_runtime_state(ensure_monitoring=True)
+        else:
+            self._sync_health_runtime_state_async_probe()
     
     def start_xray(self) -> Dict:
         """Start the Xray process."""
@@ -706,7 +735,7 @@ class ProxyService:
         
         tester = ProxyTester(timeout=timeout, max_workers=workers)
         attempts = max(1, attempts)
-        attempt_results = [tester.test_all(mappings) for _ in range(attempts)]
+        attempt_results = [tester.test_all(mappings, proxy_type=get_proxy_probe_scheme()) for _ in range(attempts)]
 
         aggregated: Dict[int, Dict[str, object]] = {
             proxy["port"]: {
@@ -758,11 +787,17 @@ class ProxyService:
                 "name": proxy["node_name"],
                 "port": proxy["port"],
                 "status": proxy["test_status"],
+                "connectivity_status": success_result.connectivity_status if success_result else "failed",
+                "successful_target_count": success_result.successful_target_count if success_result else 0,
+                "tested_targets": list(success_result.tested_targets) if success_result else [],
+                "exit_info_complete": bool(success_result and success_result.exit_info_complete),
                 "latency_ms": proxy["latency_ms"],
                 "exit_ip": proxy["exit_ip"],
                 "exit_country": proxy.get("exit_country"),
                 "exit_country_code": proxy.get("exit_country_code"),
                 "error": error,
+                "tested_target": success_result.tested_target if success_result else None,
+                "successful_target": success_result.successful_target if success_result else None,
                 "failed_attempts": failed_attempts,
             })
 
@@ -803,7 +838,7 @@ class ProxyService:
             raise ValueError(f"Proxy on port {port} is not loaded into current Xray runtime")
         
         tester = ProxyTester(timeout=timeout, max_workers=1)
-        result = tester.test_port(port, proxy["node_name"])
+        result = tester.test_port(port, proxy["node_name"], proxy_type=get_proxy_probe_scheme())
         
         if result.success:
             proxy["test_status"] = "success"
@@ -825,11 +860,17 @@ class ProxyService:
             "name": proxy["node_name"],
             "port": proxy["port"],
             "status": proxy["test_status"],
+            "connectivity_status": result.connectivity_status,
+            "successful_target_count": result.successful_target_count,
+            "tested_targets": list(result.tested_targets),
+            "exit_info_complete": bool(result.exit_info_complete),
             "latency_ms": proxy["latency_ms"],
             "exit_ip": proxy["exit_ip"],
             "exit_country": proxy.get("exit_country"),
             "exit_country_code": proxy.get("exit_country_code"),
-            "error": result.error
+            "error": result.error,
+            "tested_target": result.tested_target,
+            "successful_target": result.successful_target,
         }
 
 

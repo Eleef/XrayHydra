@@ -261,6 +261,10 @@ class NodeTestResult(BaseModel):
     name: str
     proxy_port: Optional[int] = None
     status: TestStatus
+    connectivity_status: Literal["success", "failed", "partial"] = "failed"
+    successful_target_count: int = 0
+    tested_targets: List[str] = Field(default_factory=list)
+    exit_info_complete: bool = False
     latency_ms: Optional[int] = None
     exit_ip: Optional[str] = None
     exit_country: Optional[str] = None
@@ -331,8 +335,8 @@ class ProxyResponse(BaseModel):
             "example": {
                 "port": 10000,
                 "proxy_address": "127.0.0.1:10000",
-                "proxy_scheme": "http",
-                "supported_proxy_protocols": ["http", "socks5"],
+                "proxy_scheme": "socks5",
+                "supported_proxy_protocols": ["socks5"],
                 "http_proxy_url": "http://127.0.0.1:10000",
                 "socks5_proxy_url": "socks5://127.0.0.1:10000",
                 "socks5h_proxy_url": "socks5h://127.0.0.1:10000",
@@ -554,8 +558,10 @@ class ProxyHealthResponse(BaseModel):
                 "last_check": "2026-03-07T03:10:00",
                 "last_success": "2026-03-07T03:10:00",
                 "last_latency_ms": 386.12,
-                "last_error_category": "probe_failed",
+                "last_error_category": "connectivity_failed",
                 "last_error_message": "请求超时",
+                "last_probe_summary": "connectivity 2/3; exit-info 0/0",
+                "last_successful_target": "https://www.gstatic.com/generate_204",
             }
         }
     )
@@ -569,6 +575,8 @@ class ProxyHealthResponse(BaseModel):
     last_latency_ms: Optional[float] = None
     last_error_category: Optional[str] = None
     last_error_message: Optional[str] = None
+    last_probe_summary: Optional[str] = None
+    last_successful_target: Optional[str] = None
 
 
 class HealthStatusListResponse(BaseModel):
@@ -584,7 +592,7 @@ class HealthConfigResponse(BaseModel):
     """Response model for health monitoring config."""
     enabled: bool
     check_interval_seconds: int
-    test_target: str
+    connectivity_targets: List[str]
     test_timeout_seconds: int
     test_targets_presets: List[TestTargetPreset]
     penalty_levels_minutes: List[int]
@@ -598,12 +606,12 @@ class HealthConfigUpdate(BaseModel):
             "example": {
                 "enabled": True,
                 "check_interval_seconds": 60,
-                "test_target": "http://ip-api.com/json",
+                "connectivity_targets": ["https://www.gstatic.com/generate_204"],
                 "test_timeout_seconds": 5
             }
         }
     )
     enabled: Optional[bool] = None
     check_interval_seconds: Optional[int] = Field(None, ge=10, le=3600)
-    test_target: Optional[str] = None
+    connectivity_targets: Optional[List[str]] = None
     test_timeout_seconds: Optional[int] = Field(None, ge=1, le=30)

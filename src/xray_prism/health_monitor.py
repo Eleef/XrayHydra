@@ -15,7 +15,8 @@ from typing import List, Dict, Optional, Callable, Tuple
 import requests
 
 from .models import ProxyHealthState, HealthStatus
-from .proxy_runtime import get_proxy_access_host
+from .proxy_runtime import get_proxy_access_host, get_proxy_probe_scheme
+from .tester import DEFAULT_CONNECTIVITY_TARGETS, ProxyTester
 
 logger = logging.getLogger(__name__)
 FAILURE_THRESHOLD = 3
@@ -25,7 +26,7 @@ FAILURE_THRESHOLD = 3
 DEFAULT_CONFIG = {
     "enabled": True,
     "check_interval_seconds": 60,
-    "test_target": "http://ip-api.com/json",  # 与 Web UI 测试一致
+    "connectivity_targets": DEFAULT_CONNECTIVITY_TARGETS,
     "test_timeout_seconds": 5,
     "max_workers": 20,
     "network_check_targets": [
@@ -33,10 +34,9 @@ DEFAULT_CONFIG = {
         "http://www.taobao.com",
     ],
     "test_targets_presets": [
-        {"name": "IP-API (推荐)", "url": "http://ip-api.com/json"},
-        {"name": "HTTPBin", "url": "https://httpbin.org/ip"},
-        {"name": "百度 (国内)", "url": "http://www.baidu.com"},
-        {"name": "Google (国外)", "url": "http://www.google.com"},
+        {"name": "GStatic 204", "url": "https://www.gstatic.com/generate_204"},
+        {"name": "Google 204", "url": "https://www.google.com/generate_204"},
+        {"name": "Cloudflare", "url": "http://cp.cloudflare.com/"},
     ],
     # 罚时等级（分钟）
     "penalty_levels_minutes": [5, 30, 150],
@@ -48,7 +48,7 @@ class HealthMonitor:
     
     def __init__(
         self,
-        test_target: str = DEFAULT_CONFIG["test_target"],
+        connectivity_targets: Optional[List[str]] = None,
         timeout: int = DEFAULT_CONFIG["test_timeout_seconds"],
         max_workers: int = DEFAULT_CONFIG["max_workers"],
         penalty_levels: List[int] = None,
@@ -58,13 +58,13 @@ class HealthMonitor:
         初始化健康监测器
         
         Args:
-            test_target: 测试目标 URL
+            connectivity_targets: 连通性探测目标列表
             timeout: 请求超时时间（秒）
             max_workers: 最大并发线程数
             penalty_levels: 罚时等级列表（分钟），如 [5, 30, 150]
             listen_address: 代理监听地址
         """
-        self.test_target = test_target
+        self.connectivity_targets = list(connectivity_targets or DEFAULT_CONFIG["connectivity_targets"])
         self.timeout = timeout
         self.max_workers = max_workers
         self.listen_address = listen_address or get_proxy_access_host()
@@ -102,15 +102,15 @@ class HealthMonitor:
             except Exception as e:
                 logger.debug(f"网络检测失败 ({target}): {e}")
                 continue
-        
-        logger.warning("本机网络连接中断，跳过健康检测")
+
+        logger.warning("本机网络连接异常，将继续执行代理健康探测并附加诊断信息")
         return False
-    
+
     def probe_proxy(
         self,
         port: int,
-        proxy_type: str = "http"
-    ) -> Tuple[bool, Optional[float], Optional[str], Optional[str]]:
+        proxy_type: Optional[str] = None
+    ) -> Tuple[bool, Optional[float], Optional[str], Optional[str], str, Optional[str]]:
         """
         探测单个代理的连通性
         
@@ -119,46 +119,36 @@ class HealthMonitor:
             proxy_type: 代理类型 (http/socks5)
             
         Returns:
-            Tuple[bool, Optional[float], Optional[str], Optional[str]]:
-                (是否成功, 延迟ms, 错误信息, 错误分类)
+            (是否成功, 延迟ms, 错误信息, 错误分类, 探测摘要, 最后成功目标)
         """
         if not self._is_local_proxy_available(port):
-            return False, None, "本地代理端口未监听", "runtime_unavailable"
+            return False, None, "本地代理端口未监听", "runtime_unavailable", "runtime unavailable", None
 
-        proxy_url = f"{proxy_type}://{self.listen_address}:{port}"
-        proxies = {
-            "http": proxy_url,
-            "https": proxy_url,
-        }
-        
-        start_time = time.time()
-        
-        try:
-            response = requests.get(
-                self.test_target,
-                proxies=proxies,
-                timeout=self.timeout,
-                allow_redirects=True,
+        tester = ProxyTester(
+            timeout=self.timeout,
+            max_workers=1,
+            listen_address=self.listen_address,
+            connectivity_targets=self.connectivity_targets,
+            exit_info_targets=[],
+        )
+        result = tester.test_port(port, f"proxy:{port}", proxy_type=proxy_type or get_proxy_probe_scheme())
+        if result.success:
+            return (
+                True,
+                result.latency_ms,
+                None,
+                None,
+                result.last_probe_summary or "",
+                result.successful_target,
             )
-            
-            # 只要能建立连接就算成功（HTTP 状态码 < 500）
-            if response.status_code < 500:
-                latency_ms = (time.time() - start_time) * 1000
-                return True, round(latency_ms, 2), None, None
-            else:
-                return False, None, f"HTTP {response.status_code}", "probe_failed"
-                
-        except requests.exceptions.Timeout:
-            return False, None, "请求超时", "probe_failed"
-        except requests.exceptions.ProxyError:
-            return False, None, "代理错误", "runtime_unavailable"
-        except requests.exceptions.ConnectionError as e:
-            error_text = str(e).lower()
-            if any(keyword in error_text for keyword in ("refused", "proxy", "failed to establish a new connection", "actively refused")):
-                return False, None, "连接错误", "runtime_unavailable"
-            return False, None, "连接错误", "probe_failed"
-        except Exception as e:
-            return False, None, f"未知错误: {str(e)[:30]}", "probe_failed"
+        return (
+            False,
+            None,
+            result.error or "connectivity targets failed",
+            "connectivity_failed",
+            result.last_probe_summary or "",
+            result.successful_target,
+        )
 
     def _is_local_proxy_available(self, port: int) -> bool:
         """Check whether the local proxy port is actually listening."""
@@ -225,7 +215,13 @@ class HealthMonitor:
         
         logger.debug(f"代理 :{port} 探测成功 ({latency_ms:.0f}ms)")
     
-    def handle_probe_failure(self, port: int, error: str, error_category: str = "probe_failed") -> None:
+    def handle_probe_failure(
+        self,
+        port: int,
+        error: str,
+        error_category: str = "connectivity_failed",
+        probe_summary: Optional[str] = None,
+    ) -> None:
         """
         处理探测失败
         
@@ -242,6 +238,8 @@ class HealthMonitor:
         state.failure_count += 1
         state.last_error_category = error_category
         state.last_error_message = error
+        if probe_summary:
+            state.last_probe_summary = probe_summary
 
         # 连续失败达到阈值后才触发罚时禁用
         if state.failure_count >= FAILURE_THRESHOLD and state.status != HealthStatus.DISABLED:
@@ -288,7 +286,7 @@ class HealthMonitor:
     def run_health_check(
         self,
         ports: List[int],
-        proxy_type: str = "http",
+        proxy_type: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> Dict[int, ProxyHealthState]:
         """
@@ -323,9 +321,7 @@ class HealthMonitor:
             return self._health_states
         
         # 3. 检查本机网络
-        if not self.check_network_connectivity():
-            logger.warning("网络中断，跳过本轮健康检测")
-            return self._health_states
+        direct_network_ok = self.check_network_connectivity()
         
         # 4. 并发探测
         logger.info(f"开始健康检测: {len(ports_to_check)} 个代理")
@@ -342,19 +338,31 @@ class HealthMonitor:
                 port = future_to_port[future]
                 try:
                     result = future.result()
-                    if len(result) == 4:
+                    if len(result) == 6:
+                        success, latency_ms, error, error_category, probe_summary, successful_target = result
+                    elif len(result) == 4:
                         success, latency_ms, error, error_category = result
+                        probe_summary = None
+                        successful_target = None
                     else:
                         success, latency_ms, error = result
-                        error_category = "probe_failed"
+                        error_category = "connectivity_failed"
+                        probe_summary = None
+                        successful_target = None
                     
                     if success:
                         self.handle_probe_success(port, latency_ms)
+                        state = self.get_or_create_state(port)
+                        state.last_probe_summary = probe_summary
+                        state.last_successful_target = successful_target
+                        if not direct_network_ok:
+                            state.last_error_category = "network_advisory"
+                            state.last_error_message = "直连网络检测异常，本轮健康结果可信度降低"
                     else:
-                        self.handle_probe_failure(port, error, error_category)
+                        self.handle_probe_failure(port, error, error_category, probe_summary)
                         
                 except Exception as e:
-                    self.handle_probe_failure(port, str(e), "probe_failed")
+                    self.handle_probe_failure(port, str(e), "connectivity_failed")
                 
                 completed += 1
                 if progress_callback:

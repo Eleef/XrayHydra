@@ -6,6 +6,48 @@
 const API_BASE = '/api';
 
 class ApiClient {
+    formatErrorMessage(payload, fallbackStatus) {
+        if (payload == null) {
+            return `HTTP ${fallbackStatus}`;
+        }
+
+        if (typeof payload === 'string') {
+            const message = payload.trim();
+            return message || `HTTP ${fallbackStatus}`;
+        }
+
+        if (Array.isArray(payload)) {
+            const parts = payload
+                .map((item) => this.formatErrorMessage(item, fallbackStatus))
+                .filter(Boolean);
+            return parts.join('; ') || `HTTP ${fallbackStatus}`;
+        }
+
+        if (typeof payload === 'object') {
+            const detail = payload.detail;
+            if (detail !== undefined) {
+                return this.formatErrorMessage(detail, fallbackStatus);
+            }
+            if (typeof payload.message === 'string' && payload.message.trim()) {
+                return payload.message.trim();
+            }
+            if (typeof payload.error === 'string' && payload.error.trim()) {
+                return payload.error.trim();
+            }
+            if (typeof payload.msg === 'string' && payload.msg.trim()) {
+                return payload.msg.trim();
+            }
+
+            const location = Array.isArray(payload.loc) ? payload.loc.join('.') : '';
+            const message = typeof payload.msg === 'string' ? payload.msg.trim() : '';
+            if (location && message) {
+                return `${location}: ${message}`;
+            }
+        }
+
+        return `HTTP ${fallbackStatus}`;
+    }
+
     /**
      * Make an HTTP request
      * @param {string} endpoint - API endpoint
@@ -27,7 +69,7 @@ class ApiClient {
 
             if (!response.ok) {
                 const error = await response.json().catch(() => ({ detail: response.statusText }));
-                throw new Error(error.detail || `HTTP ${response.status}`);
+                throw new Error(this.formatErrorMessage(error, response.status));
             }
 
             return await response.json();
